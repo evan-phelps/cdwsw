@@ -194,3 +194,99 @@ group by concept_cd,substr(concept_path,2,instr(concept_path,'\',2)-2)
 on(cdim.concept_cd = ob.concept_cd)
 );
 
+
+-- Get Patient dimension table counts
+
+--HSSC
+select distinct (substr(c_basecode, 1, instr(c_basecode, ':')-1)) attribute 
+,c_columnname column_name
+from i2b2hsscmeta.ont_demo 
+where (substr(c_basecode, 1, instr(c_basecode, ':')-1)) is not null
+;
+--create pat_tuple_hssc using the attribute and column_name 
+
+--MUSC 
+select distinct (substr(c_basecode, 1, instr(c_basecode, ':')-1)) attribute 
+,c_columnname column_name
+from i2b2muscmeta.ont_demo 
+where (substr(c_basecode, 1, instr(c_basecode, ':')-1)) is not null
+;
+--create pat_tuple_musc using the attribute and column_name
+
+
+
+--GHS 
+select distinct (substr(c_basecode, 1, instr(c_basecode, ':')-1)) attribute 
+,c_columnname column_name
+from i2b2ghsmeta.ont_demo 
+where (substr(c_basecode, 1, instr(c_basecode, ':')-1)) is not null
+;
+--create pat_tuple_ghs using the attribute and column_name
+
+
+--PH 
+select distinct (substr(c_basecode, 1, instr(c_basecode, ':')-1)) attribute 
+,c_columnname column_name
+from i2b2phmeta.ont_demo 
+where (substr(c_basecode, 1, instr(c_basecode, ':')-1)) is not null
+;
+--create pat_tuple_ph using the attribute and column_name
+
+
+ 
+--SRHS 
+select distinct (substr(c_basecode, 1, instr(c_basecode, ':')-1)) attribute 
+,c_columnname column_name
+from i2b2srhsmeta.ont_demo 
+where (substr(c_basecode, 1, instr(c_basecode, ':')-1)) is not null
+;
+--create pat_tuple_srhs using the attribute and column_name
+
+--run python code using the above tuples get counts for all the attribute-value pairs in the patient 
+--dimension table
+
+
+--GET VISTI DIMENSION TABLE COUNTS
+
+--HSSC
+select distinct(substr(c_basecode, 1, instr(c_basecode, ':')-1)) attribute
+from i2b2hsscmeta.ont_visit
+where (substr(c_basecode, 1, instr(c_basecode, ':')-1)) is not null
+;
+--create visit_tuple_hssc using the attribute and column_name 
+
+
+--MUSC
+select distinct(substr(c_basecode, 1, instr(c_basecode, ':')-1)) attribute
+from i2b2muscmeta.ont_visit
+where (substr(c_basecode, 1, instr(c_basecode, ':')-1)) is not null
+;
+--create visit_tuple_musc using the attribute and column_name 
+
+
+--GHS
+select distinct(substr(c_basecode, 1, instr(c_basecode, ':')-1)) attribute
+from i2b2ghsmeta.ont_visit
+where (substr(c_basecode, 1, instr(c_basecode, ':')-1)) is not null
+;
+--create visit_tuple_ghs using the attribute and column_name
+
+
+--PH
+select distinct(substr(c_basecode, 1, instr(c_basecode, ':')-1)) attribute
+from i2b2phmeta.ont_visit
+where (substr(c_basecode, 1, instr(c_basecode, ':')-1)) is not null
+;
+--create visit_tuple_ph using the attribute and column_name
+
+
+--SRHS
+select distinct(substr(c_basecode, 1, instr(c_basecode, ':')-1)) attribute
+from i2b2srhscmeta.ont_visit
+where (substr(c_basecode, 1, instr(c_basecode, ':')-1)) is not null
+;
+--create visit_tuple_srhs using the attribute and column_name
+
+--Need to figure out a way to get the column names for all the attributes
+--run python code using the above tuples get counts for all the attribute-value pairs in the visit
+--dimension table 
