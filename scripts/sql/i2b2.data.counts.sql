@@ -6,7 +6,7 @@ nologging
 as
 (
 select concept_cd, count(1) total_recs,
-count(patient_num) pat_counts,
+count(distinct patient_num) pat_counts,
 count(distinct encounter_num) enc_counts
 from i2b2HSSCdata.observation_fact
 group by concept_cd
@@ -19,7 +19,7 @@ nologging
 as
 (
 select concept_cd, count(1) total_recs,
-count(patient_num) pat_counts,
+count(distinct patient_num) pat_counts,
 count(distinct encounter_num) enc_counts
 from i2b2MUSCdata.observation_fact
 group by concept_cd
@@ -32,7 +32,7 @@ nologging
 as
 (
 select concept_cd, count(1) total_recs,
-count(patient_num) pat_counts,
+count(distinct patient_num) pat_counts,
 count(distinct encounter_num) enc_counts
 from i2b2GHSdata.observation_fact
 group by concept_cd
@@ -46,7 +46,7 @@ nologging
 as
 (
 select concept_cd, count(1) total_recs,
-count(patient_num) pat_counts,
+count(distinct patient_num) pat_counts,
 count(distinct encounter_num) enc_counts
 from i2b2PHdata.observation_fact
 group by concept_cd
@@ -60,7 +60,7 @@ nologging
 as
 (
 select concept_cd, count(1) total_recs,
-count(patient_num) pat_counts,
+count(distinct patient_num) pat_counts,
 count(distinct encounter_num) enc_counts
 from i2b2SRHSdata.observation_fact
 group by concept_cd
