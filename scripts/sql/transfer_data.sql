@@ -18,6 +18,7 @@ BEGIN
     m_pat_tabs := VARRAY_VARCHAR( 'CDW.PATIENT','CDW.PATIENT_ID_MAP');
     m_vis_tabs := VARRAY_VARCHAR( 'CDW.VISIT', 'CDW.VISIT_DETAIL');
     m_pat_detl := VARRAY_VARCHAR( 'CDW.PROCEDURE', 'CDW.LAB_RESULT',
+            'CDW.DIAGNOSIS', 'CDW.VITAL',
             'CDW.MEDICATION_ORDER', 'CDW.MEDICATION_ADMIN' );
             
     -- poppulate patient ids
@@ -185,6 +186,7 @@ BEGIN
       ' nologging AS
       select visit_id from cdw.visit';
     DBMS_OUTPUT.PUT_LINE(m_query);
+    EXECUTE immediate m_query;
 
     BEGIN    
     
