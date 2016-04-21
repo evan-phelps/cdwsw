@@ -1,6 +1,6 @@
 
 -------------------------------------------------------------------------------------------------
-create or replace PROCEDURE                   ETL_DIAGNOSIS authid current_user
+create or replace PROCEDURE                            ETL_DIAGNOSIS authid current_user
 IS
 
    m_rowcnt NUMBER := 0; -- row counter
@@ -40,9 +40,9 @@ IS
 
   for dx in  dx_cur LOOP
     BEGIN
-    insert into i2b2hsscdata.observation_fact 
-      (encounter_num,patient_num,concept_cd,provider_id,start_date,
-      end_date, modifier_cd,instance_num,valtype_cd,tval_char,nval_num,
+      insert into i2b2hsscdata.observation_fact
+        (encounter_num,patient_num,concept_cd,provider_id,start_date,
+        end_date, modifier_cd,instance_num,valtype_cd,tval_char,nval_num,
         quantity_num,valueflag_cd,units_cd, location_cd,
         import_date,sourcesystem_cd,observation_blob,
         confidence_num,download_date,update_date)
@@ -52,27 +52,26 @@ IS
           sysdate,dx.sourcesystem_cd, null, '1',null,null);
           
           
-          EXCEPTION WHEN OTHERS 
-          THEN
-          pkg_error.log(p_error_code => substr(sqlerrm,1,9),
-              p_error_message => substr(sqlerrm,12) || '.EXCP ' 
-              || dx.encounter_num || ', ' || dx.patient_num,
-              p_package => '', p_procedure => m_procname);
-    END;       
-        m_rowcnt := m_rowcnt + 1;
+      EXCEPTION WHEN OTHERS
+      THEN
+        pkg_error.log(p_error_code => substr(sqlerrm,1,9),
+          p_error_message => substr(sqlerrm,12) || '.EXCP '
+            || dx.encounter_num || ', ' || dx.patient_num,
+          p_package => '', p_procedure => m_procname);
+    END;
+    m_rowcnt := m_rowcnt + 1;
 
-        if ( m_rowcnt > 0 and mod(m_rowcnt, m_comrows) = 0 ) then
-              COMMIT;
-        end if;
+    if ( m_rowcnt > 0 and mod(m_rowcnt, m_comrows) = 0 ) then
+      COMMIT;
+    end if;
   end loop;
   
   commit;
 
 END ETL_DIAGNOSIS;
-
 -------------------------------------------------------------------------------------------------
 
-create or replace PROCEDURE          ETL_PROCEDURE authid current_user
+create or replace PROCEDURE                   ETL_PROCEDURE authid current_user
 IS
 
    m_rowcnt NUMBER := 0; -- row counter
@@ -142,9 +141,9 @@ AND x.proc_start_date is not null and x.proc_code is not null;
               p_error_message => substr(sqlerrm,12) || '.EXCP ' 
               || px.encounter_num || ', ' || px.patient_num,
               p_package => '', p_procedure => m_procname);
-    END;       
-        m_rowcnt := m_rowcnt + 1;
+    END;
 
+        m_rowcnt := m_rowcnt + 1;
         if ( m_rowcnt > 0 and mod(m_rowcnt, m_comrows) = 0 ) then
               COMMIT;
         end if;
@@ -153,10 +152,9 @@ AND x.proc_start_date is not null and x.proc_code is not null;
   commit;
 
 END ETL_PROCEDURE;
-
 -------------------------------------------------------------------------------------------------
 
-create or replace PROCEDURE          ETL_LABS authid current_user
+create or replace PROCEDURE                   ETL_LABS authid current_user
 IS
 
    m_rowcnt NUMBER := 0; -- row counter
@@ -172,7 +170,7 @@ IS
       'LOINC:' || X.LOINC_CD as CONCEPT_CD, --how do we pull RZ.TGT_CODE_TYPE?
     
       COALESCE(X.RESULT_DT, V.VISIT_START_DATE) - S.SHIFTVALUE as START_DATE, -- Lab Date or Visit Start Date -- modified
-      '1' as INSTANCE_NUM, 
+      '1' as INSTANCE_NUM,
     
       COALESCE(X.result_DT, V.VISIT_END_DATE) - S.SHIFTVALUE as END_DATE, -- Lab Date or Visit End Date,  -- modified
     
@@ -190,39 +188,38 @@ IS
 
     for lb in  labs_cur LOOP
           BEGIN
-           insert into i2b2hsscdata.observation_fact 
+           insert into i2b2hsscdata.observation_fact
            (encounter_num,patient_num,concept_cd,provider_id,start_date,
              end_date, modifier_cd,instance_num,valtype_cd,tval_char,
              nval_num,quantity_num,valueflag_cd,units_cd, location_cd,
              import_date,sourcesystem_cd,observation_blob,
              confidence_num,download_date,update_date)
           values (lb.encounter_num,lb.patient_num,lb.concept_cd,
-          '@',lb.start_date,lb.end_date,'@',lb.instance_num, '@', '@', 
-          null, null, '@', '@', '@',sysdate,lb.sourcesystem_cd, 
+          '@',lb.start_date,lb.end_date,'@',lb.instance_num, '@', '@',
+          null, null, '@', '@', '@',sysdate,lb.sourcesystem_cd,
           null, '1', null, null);
         
-          EXCEPTION WHEN OTHERS 
+          EXCEPTION WHEN OTHERS
           THEN
           pkg_error.log(p_error_code => substr(sqlerrm,1,9),
-              p_error_message => substr(sqlerrm,12) || '.EXCP ' 
+              p_error_message => substr(sqlerrm,12) || '.EXCP '
               || lb.encounter_num || ', ' || lb.patient_num,
               p_package => '', p_procedure => m_procname);
-      
-        m_rowcnt := m_rowcnt + 1;
-
-        if ( m_rowcnt > 0 and mod(m_rowcnt, m_comrows) = 0 ) then
-              COMMIT;
-        end if;
         END;
+
+        m_rowcnt := m_rowcnt + 1;
+        if ( m_rowcnt > 0 and mod(m_rowcnt, m_comrows) = 0 ) then
+            COMMIT;
+        end if;
+
   end loop;
   
   commit;
 
 END ETL_LABS;
-
 -------------------------------------------------------------------------------------------------
 
-create or replace PROCEDURE ETL_MEDICATION_ORDER authid current_user
+create or replace PROCEDURE                                              ETL_MEDICATION_ORDER authid current_user
 IS
 
    m_rowcnt NUMBER := 0; -- row counter
@@ -232,27 +229,28 @@ IS
 
   CURSOR med_orders_cur IS
       select * from (
-          select distinct nvl2(a.admin_start_date,'A','N') AS admin, 
+          select distinct nvl2(a.admin_start_date,'A','N') AS admin,
             v.visit_deid, v.patient_deid,
-            COALESCE(o.START_DATE, s.visit_start_date) - 
+            COALESCE(o.START_DATE, s.visit_start_date) -
                 v.shiftvalue as shifted_start_date, -- modified
-            COALESCE(o.END_DATE, s.visit_end_date) - 
+            COALESCE(o.END_DATE, s.visit_end_date) -
                 v.shiftvalue as shifted_end_date, -- modified
             o.med_code,
             rank () over (
-              partition by v.visit_deid, 
-                  to_char(o.start_date,'mm/dd/yyyy'), 
+              partition by v.visit_deid,
+                  to_char(o.start_date,'mm/dd/yyyy'),
                   o.med_code order by rownum) as rank
-          from cdw.medication_order@dtdev o 
+          from cdw.medication_order@dtdev o
           left outer join cdw.medication_admin@dtdev a on (o.MED_ORDER_ID = a.MED_ORDER_ID)
-          join cdw.visit_deid_map_HSSC@dtdev v on (v.visit_id = o.visit_id)  
+          join cdw.visit_deid_map_HSSC@dtdev v on (v.visit_id = o.visit_id)
           join cdw.visit@dtdev s on (v.visit_id = s.visit_id)
           where o.visit_id is not null
        
-          -- 1% of med_orders the start date is slightly off. we will revisit this 
+          -- 1% of med_orders the start date is slightly off. we will revisit this
           -- for the next round (4/19/2016)
           and (o.start_date is not null or s.visit_start_date is not null)
-          order by v.visit_deid, o.start_date, o.med_code
+          and o.med_code is not null
+          order by v.visit_deid, shifted_start_date, o.med_code
       )
       where rank=1;
 
@@ -260,10 +258,10 @@ IS
 
 
     for mo in  med_orders_cur LOOP
-    
+
         if mo.med_code is not null then
           BEGIN
-            insert into i2b2hsscdata.observation_fact 
+            insert into i2b2hsscdata.observation_fact
             (encounter_num,patient_num,concept_cd,provider_id,start_date,
              end_date, modifier_cd,instance_num,valtype_cd,tval_char,
              valueflag_cd,units_cd, location_cd,import_date,sourcesystem_cd)
@@ -272,30 +270,30 @@ IS
             '@','@','@','@','@',sysdate,'CDW');
 
           if mo.admin = 'A' then
-             insert into i2b2hsscdata.observation_fact  
+             insert into i2b2hsscdata.observation_fact
              (encounter_num,patient_num,concept_cd, provider_id,start_date,
                end_date, modifier_cd,instance_num,valtype_cd,tval_char,
                valueflag_cd,units_cd, location_cd,import_date,sourcesystem_cd)
                 values (mo.visit_deid,mo.patient_deid,'RXCUI:' || mo.med_code,
-                '@', mo.shifted_start_date, mo.shifted_end_date, 
+                '@', mo.shifted_start_date, mo.shifted_end_date,
                 'MED:ADMIN',mo.rank,'T',mo.admin,NULL,'@','@',sysdate,'CDW');
           end if;
 
-          EXCEPTION WHEN OTHERS 
+          EXCEPTION WHEN OTHERS
           THEN
           pkg_error.log(p_error_code => substr(sqlerrm,1,9),
-              p_error_message => substr(sqlerrm,12) || '.EXCP ' 
+              p_error_message => substr(sqlerrm,12) || '.EXCP '
               || mo.visit_deid || ', ' || mo.patient_deid,
               p_package => '', p_procedure => m_procname);
-      
-        m_rowcnt := m_rowcnt + 1;
+        END;
 
+        m_rowcnt := m_rowcnt + 1;
         if ( m_rowcnt > 0 and mod(m_rowcnt, m_comrows) = 0 ) then
               COMMIT;
         end if;
-        END;
-        
-    end if;  
+
+
+    end if;
   end loop;
   
   commit;
@@ -304,7 +302,7 @@ END ETL_MEDICATION_ORDER;
 -------------------------------------------------------------------------------------------------
 
 
-create or replace PROCEDURE ETL_VITAL authid current_user
+create or replace PROCEDURE                   ETL_VITAL authid current_user
 IS
 
    m_rowcnt NUMBER := 0; -- row counter
@@ -314,78 +312,76 @@ IS
 
   cursor vital_cur is 
     SELECT DISTINCT
-      /*+ PARALLEL 8 */
+    /*+ PARALLEL 8 */
       D.PATIENT_DEID AS PATIENT_NUM,
       M.VISIT_DEID AS ENCOUNTER_NUM,
-      'VITAL:' || decode(V.OBSERVATION_TYPE,'HEIGHT','HT','WEIGHT','WT') 
-        as CONCEPT_CD,
+      'VITAL:' || decode(V.OBSERVATION_TYPE,
+        'HEIGHT','HT','WEIGHT','WT') as CONCEPT_CD,
   
-      COALESCE(V.COLLECTION_DATE, S.VISIT_START_DATE) - 
-        D.SHIFTVALUE as START_DATE, -- modified
-      COALESCE(V.COLLECTION_DATE, S.VISIT_END_DATE) - 
-        D.SHIFTVALUE as END_DATE, -- modified
-    
-      '1' as INSTANCE_NUM, 
-      '@' as PROVIDER_ID, 
+      COALESCE(V.COLLECTION_DATE, S.VISIT_START_DATE) -
+          D.SHIFTVALUE as START_DATE,
+      COALESCE(V.COLLECTION_DATE, S.VISIT_END_DATE) -
+          D.SHIFTVALUE as END_DATE,
 
-      -- convert height to inches and weight to pounds 
-      -- todo look at the unit of measure (don't assume it's cm/kg)
-      ROUND(decode(v.observation_type,'HEIGHT', 
-        V.VITAL_VALUE_NUM * .3937,
-        V.VITAL_VALUE_NUM * 2.2046),2) 
-          as NVAL_NUM,  
+      '1' as INSTANCE_NUM,
+      '@' as PROVIDER_ID,
 
-      '@' as VALUEFLAG_CD, 
-      null as QUANTITY_NUM,  
+        -- convert height to inches and weight to pounds
+        -- todo look at the unit of measure (don't assume it's cm/kg)
+        ROUND(decode(v.observation_type,'HEIGHT',
+          V.VITAL_VALUE_NUM * .3937,V.VITAL_VALUE_NUM * 2.2046),2)
+          as NVAL_NUM,
+
+      '@' as VALUEFLAG_CD,
+      null as QUANTITY_NUM,
       DECODE(V.OBSERVATION_TYPE,'HEIGHT','inches','lbs') as UNITS_CD,
-      'N' as valtype_cd,
-      'E' as tval_char---,
-      ----V.HTB_ENC_ACT_ID as ACT_ID,
-      ----V.HTB_ENC_ACT_VER_NUM AS ACT_VER_NUM
-      FROM cdw.VITAL@dtdev V
-      JOIN cdw.Patient_deid_map_hssc@dtdev D ON (V.PATIENT_ID = D.PATIENT_ID)
-      JOIN CDW.VISIT@dtdev S ON (S.HTB_ENC_ACT_ID = V.HTB_ENC_ACT_ID)
-      JOIN cdw.Visit_deid_map_hssc@dtdev M ON (M.VISIT_ID = S.VISIT_ID)
+    'N' as valtype_cd,
+    'E' as tval_char---,
+    ----V.HTB_ENC_ACT_ID as ACT_ID,
+    ----V.HTB_ENC_ACT_VER_NUM AS ACT_VER_NUM
+    FROM cdw.VITAL@dtdev V
+    JOIN CDW.VISIT@dtdev S ON (S.HTB_ENC_ACT_ID = V.HTB_ENC_ACT_ID)
+    JOIN cdw.Patient_deid_map_hssc@dtdev D ON (S.PATIENT_ID = D.PATIENT_ID)
+    JOIN cdw.Visit_deid_map_hssc@dtdev M ON (M.VISIT_ID = S.VISIT_ID)
 
-      -- upper case OBSERVATION_TYPE required ? -- revisit (04/19/2016)
-      where OBSERVATION_TYPE in ('HEIGHT','WEIGHT')
-      and (v.collection_date is not null or s.visit_start_date is not null);
-
+    -- upper case OBSERVATION_TYPE required ? -- revisit (04/19/2016)
+    where OBSERVATION_TYPE in ('HEIGHT','WEIGHT')
+    and (v.collection_date is not null or s.visit_start_date is not null);
 
   BEGIN
 
 
     FOR vo IN vital_cur LOOP
-          BEGIN
+        BEGIN
             insert into i2b2hsscdata.observation_fact (
-              start_date, end_date, provider_id, patient_num, 
-              instance_num, import_date, encounter_num, 
+              start_date, end_date, provider_id, patient_num,
+              instance_num, import_date, encounter_num,
               concept_cd,nval_num,units_cd, valtype_cd,
-              tval_char, update_date,modifier_cd) 
+              tval_char, update_date,modifier_cd)
             values (vo.start_date, vo.end_date,'@',
-            vo.patient_num, vo.instance_num, sysdate, 
+            vo.patient_num, vo.instance_num, sysdate,
             vo.encounter_num, vo.concept_cd,
             vo.nval_num,vo.units_cd,vo.valtype_cd,vo.tval_char,sysdate,'@');
-        
-          EXCEPTION WHEN OTHERS 
-          THEN
+
+        EXCEPTION WHEN OTHERS
+        THEN
           pkg_error.log(p_error_code => substr(sqlerrm,1,9),
-              p_error_message => substr(sqlerrm,12) || '.EXCP ' 
+              p_error_message => substr(sqlerrm,12) || '.EXCP '
               || vo.encounter_num || ', ' || vo.patient_num,
               p_package => '', p_procedure => m_procname);
-      
+        END;
         m_rowcnt := m_rowcnt + 1;
 
         if ( m_rowcnt > 0 and mod(m_rowcnt, m_comrows) = 0 ) then
+              DBMS_OUTPUT.PUT_LINE('committed: ' || m_rowcnt);
               COMMIT;
         end if;
-        END;
+
   end loop;
-  
+
   commit;
 
 END ETL_VITAL;
-
 -------------------------------------------------------------------------------------------------
 
 create or replace PROCEDURE          HSSC_OBS_FACT authid current_user 
