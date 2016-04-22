@@ -218,8 +218,7 @@ IS
 
 END ETL_LABS;
 -------------------------------------------------------------------------------------------------
-
-create or replace PROCEDURE                                              ETL_MEDICATION_ORDER authid current_user
+create or replace PROCEDURE            "ETL_MEDICATION_ORDER" authid current_user
 IS
 
    m_rowcnt NUMBER := 0; -- row counter
@@ -227,18 +226,18 @@ IS
    m_procname ERRORLOG.PROCEDURE_NAME%TYPE := 'ETL_MEDICATION_ORDER';
 
 
-  CURSOR med_orders_cur IS
+ CURSOR med_orders_cur IS
       select * from (
-          select distinct nvl2(a.admin_start_date,'A','N') AS admin,
-            v.visit_deid, v.patient_deid,
-            COALESCE(o.START_DATE, s.visit_start_date) -
+    select distinct nvl2(a.admin_start_date,'A','N') AS admin,
+       v.visit_deid, v.patient_deid,
+            COALESCE(a.admin_start_date, o.START_DATE, s.visit_start_date) -
                 v.shiftvalue as shifted_start_date, -- modified
-            COALESCE(o.END_DATE, s.visit_end_date) -
+            COALESCE(a.admin_end_date, o.END_DATE, s.visit_end_date) -
                 v.shiftvalue as shifted_end_date, -- modified
             o.med_code,
             rank () over (
               partition by v.visit_deid,
-                  to_char(o.start_date,'mm/dd/yyyy'),
+                  coalesce(to_char(a.admin_start_date,'mm/dd/yyyy'),to_char(o.start_date,'mm/dd/yyyy')),
                   o.med_code order by rownum) as rank
           from cdw.medication_order@dtdev o
           left outer join cdw.medication_admin@dtdev a on (o.MED_ORDER_ID = a.MED_ORDER_ID)
@@ -248,7 +247,7 @@ IS
        
           -- 1% of med_orders the start date is slightly off. we will revisit this
           -- for the next round (4/19/2016)
-          and (o.start_date is not null or s.visit_start_date is not null)
+          and (a.admin_start_date is not null or o.start_date is not null or s.visit_start_date is not null)
           and o.med_code is not null
           order by v.visit_deid, shifted_start_date, o.med_code
       )
@@ -261,7 +260,7 @@ IS
 
         if mo.med_code is not null then
           BEGIN
-            insert into i2b2hsscdata.observation_fact
+            insert into I2B2HSSCDATA.observation_fact
             (encounter_num,patient_num,concept_cd,provider_id,start_date,
              end_date, modifier_cd,instance_num,valtype_cd,tval_char,
              valueflag_cd,units_cd, location_cd,import_date,sourcesystem_cd)
@@ -270,7 +269,7 @@ IS
             '@','@','@','@','@',sysdate,'CDW');
 
           if mo.admin = 'A' then
-             insert into i2b2hsscdata.observation_fact
+             insert into I2B2HSSCDATA.observation_fact
              (encounter_num,patient_num,concept_cd, provider_id,start_date,
                end_date, modifier_cd,instance_num,valtype_cd,tval_char,
                valueflag_cd,units_cd, location_cd,import_date,sourcesystem_cd)
@@ -281,21 +280,21 @@ IS
 
           EXCEPTION WHEN OTHERS
           THEN
-          pkg_error.log(p_error_code => substr(sqlerrm,1,9),
+            pkg_error.log(p_error_code => substr(sqlerrm,1,9),
               p_error_message => substr(sqlerrm,12) || '.EXCP '
               || mo.visit_deid || ', ' || mo.patient_deid,
               p_package => '', p_procedure => m_procname);
-        END;
 
         m_rowcnt := m_rowcnt + 1;
+
         if ( m_rowcnt > 0 and mod(m_rowcnt, m_comrows) = 0 ) then
               COMMIT;
         end if;
-
+        END;
 
     end if;
   end loop;
-  
+
   commit;
 
 END ETL_MEDICATION_ORDER;
