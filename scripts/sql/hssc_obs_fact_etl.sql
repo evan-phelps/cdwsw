@@ -285,12 +285,12 @@ IS
               || mo.visit_deid || ', ' || mo.patient_deid,
               p_package => '', p_procedure => m_procname);
 
+        END;
         m_rowcnt := m_rowcnt + 1;
 
         if ( m_rowcnt > 0 and mod(m_rowcnt, m_comrows) = 0 ) then
               COMMIT;
         end if;
-        END;
 
     end if;
   end loop;
