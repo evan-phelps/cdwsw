@@ -174,13 +174,16 @@ IS
     
       COALESCE(X.result_DT, V.VISIT_END_DATE) - S.SHIFTVALUE as END_DATE, -- Lab Date or Visit End Date,  -- modified
     
+      X.result_value as NVAL_NUM,
+      X.result_uom as UNITS_CD,
       X.DATASOURCE_ID as SOURCESYSTEM_CD
-      FROM cdw.VISIT_DEID_MAP_HSSC@dtdev S
+    FROM cdw.VISIT_DEID_MAP_HSSC@dtdev S
       JOIN cdw.VISIT@dtdev V ON (V.VISIT_ID = S.VISIT_ID)
       JOIN cdw.lab_result@dtdev X ON (V.HTB_ENC_ACT_ID = X.HTB_ENC_ACT_ID)
 
       -- remove ones without LOINC codes
-      WHERE X.LOINC_CD is not null; -- added 4/19/2016
+      WHERE X.LOINC_CD is not null
+    ;
 
 
   BEGIN
@@ -188,16 +191,22 @@ IS
 
     for lb in  labs_cur LOOP
           BEGIN
-           insert into i2b2hsscdata.observation_fact
-           (encounter_num,patient_num,concept_cd,provider_id,start_date,
-             end_date, modifier_cd,instance_num,valtype_cd,tval_char,
-             nval_num,quantity_num,valueflag_cd,units_cd, location_cd,
-             import_date,sourcesystem_cd,observation_blob,
-             confidence_num,download_date,update_date)
-          values (lb.encounter_num,lb.patient_num,lb.concept_cd,
-          '@',lb.start_date,lb.end_date,'@',lb.instance_num, '@', '@',
-          null, null, '@', '@', '@',sysdate,lb.sourcesystem_cd,
-          null, '1', null, null);
+            insert into i2b2hsscdata.observation_fact
+            ( encounter_num, patient_num, concept_cd, provider_id,
+              start_date, end_date, modifier_cd, instance_num,
+              valtype_cd, tval_char, nval_num, quantity_num,
+              valueflag_cd, units_cd, location_cd,
+              import_date, sourcesystem_cd, observation_blob,
+              confidence_num, download_date, update_date
+            )
+            values
+            ( lb.encounter_num, lb.patient_num, lb.concept_cd, '@',
+              lb.start_date, lb.end_date, '@', lb.instance_num,
+              'N', 'E', lb.nval_num, null,
+              '@', lb.units_cd, '@',
+              sysdate, lb.sourcesystem_cd, null,
+              '1', null, null
+            );
         
           EXCEPTION WHEN OTHERS
           THEN
