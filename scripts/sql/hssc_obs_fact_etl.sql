@@ -393,6 +393,74 @@ END ETL_VITAL;
 
 -------------------------------------------------------------------------------------------------
 
+create or replace PROCEDURE                   ETL_VITAL_BMI authid current_user
+IS
+
+   m_rowcnt NUMBER := 0; -- row counter
+   m_comrows NUMBER := 40000; -- commit every m_comrows
+   m_procname ERRORLOG.PROCEDURE_NAME%TYPE := 'ETL_VITAL_BMI';
+
+
+  cursor vital_cur is 
+    SELECT DISTINCT
+    /*+ PARALLEL 8 */
+      D.PATIENT_DEID AS PATIENT_NUM,
+      M.VISIT_DEID AS ENCOUNTER_NUM,
+      'VITAL:CALCULATED_BMI' as CONCEPT_CD,
+      bmi.COLLECTION_DATE - D.SHIFTVALUE as START_DATE,
+      bmi.COLLECTION_DATE - D.SHIFTVALUE as END_DATE,
+      '1' as INSTANCE_NUM,
+      '@' as PROVIDER_ID,
+      bmi.BMI_VAL as NVAL_NUM,
+      '@' as VALUEFLAG_CD,
+      null as QUANTITY_NUM,
+      bmi.BMI_UOM as UNITS_CD,
+      'N' as valtype_cd,
+      'E' as tval_char
+    FROM cdw.hssc_bmi@dtdev bmi
+    JOIN CDW.VISIT@dtdev S ON (S.HTB_ENC_ACT_ID = bmi.HTB_ENC_ACT_ID)
+    JOIN cdw.Patient_deid_map_hssc@dtdev D ON (S.PATIENT_ID = D.PATIENT_ID)
+    JOIN cdw.Visit_deid_map_hssc@dtdev M ON (M.VISIT_ID = S.VISIT_ID)
+    where bmi.collection_date is not null
+    ;
+
+  BEGIN
+
+
+    FOR vo IN vital_cur LOOP
+        BEGIN
+            insert into i2b2hsscdata.observation_fact (
+              start_date, end_date, provider_id, patient_num,
+              instance_num, import_date, encounter_num,
+              concept_cd,nval_num,units_cd, valtype_cd,
+              tval_char, update_date,modifier_cd)
+            values (vo.start_date, vo.end_date,'@',
+            vo.patient_num, vo.instance_num, sysdate,
+            vo.encounter_num, vo.concept_cd,
+            vo.nval_num,vo.units_cd,vo.valtype_cd,vo.tval_char,sysdate,'@');
+
+        EXCEPTION WHEN OTHERS
+        THEN
+          pkg_error.log(p_error_code => substr(sqlerrm,1,9),
+              p_error_message => substr(sqlerrm,12) || '.EXCP '
+              || vo.encounter_num || ', ' || vo.patient_num,
+              p_package => '', p_procedure => m_procname);
+        END;
+        m_rowcnt := m_rowcnt + 1;
+
+        if ( m_rowcnt > 0 and mod(m_rowcnt, m_comrows) = 0 ) then
+              DBMS_OUTPUT.PUT_LINE('committed: ' || m_rowcnt);
+              COMMIT;
+        end if;
+
+  end loop;
+
+  commit;
+
+END ETL_VITAL_BMI;
+
+-------------------------------------------------------------------------------------------------
+
 create or replace PROCEDURE                   ETL_PATIENT authid current_user
 IS
 
