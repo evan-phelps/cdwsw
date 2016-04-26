@@ -1,0 +1,117 @@
+Issues that came up:
+
+A. (added /todo item in slack) From #0 below, about 15% of results have UOM values that do not match the most common UOM for the LOINC.
+
+B. (added /todo item in slack) There are cases where more than one source concept is mapped to a single loinc_cd (e.g., in visit_id 130087634001, prothrombin ratio PTR *and* partial thromboplastin time PTT are both mapped to LOINC 5902-2).  This is one source of the 5,625 Primary Key errors (<0.3% of records processed) but also leads can lead to misinterpretation of result searches.
+
+Dev Steps:
+
+0. check labs UOM normalization (about 15% of results have units that do not match the most common UOM for the LOINC):
+```
+
+select
+  decode(rnk_uom_within_loinc,
+           1,'N_NORMED',
+           'N_NOT_NORMED'
+        ) n_by_normed_status,
+  count(1) n_loinc_codes,
+  sum(n_results_loinc_uom) n_results
+from
+  (
+      select
+        loinc_cd,
+        result_uom,
+        n_results_loinc,
+        n_results_loinc_uom,
+        round(n_results_loinc_uom/n_results_loinc,2) f_results_loinc_uom,
+        rank() over (partition by loinc_cd order by n_results_loinc_uom desc) as rnk_uom_within_loinc
+      from
+        (
+          select
+            loinc_cd,
+            UPPER(nvl(result_uom, 1)) result_uom,
+            sum(count(1)) over (partition by loinc_cd) n_results_loinc,
+            count(1) n_results_loinc_uom
+          from cdw.lab_result
+          where loinc_cd is not null
+          group by
+            loinc_cd,
+            UPPER(nvl(result_uom, 1))
+        )
+      order by --rnk_uom_within_loinc, n_results_loinc desc
+            loinc_cd,
+            n_results_loinc desc,
+            n_results_loinc_uom desc
+  )
+group by decode(rnk_uom_within_loinc,1,'N_NORMED', 'N_NOT_NORMED')
+order by n_by_normed_status
+;
+--N_NORMED	279	1976119
+--N_NOT_NORMED	150	359190
+```
+
+1. checked counts already in dev (i2bdev_labs_countSumm_b4.dsv)
+```
+select
+  concept_cd,
+  tval_char,
+  valtype_cd,
+  count(1),
+  count(encounter_num),
+  count(distinct encounter_num),
+  count(patient_num),
+  count(distinct patient_num),
+  count(start_date),
+  count(distinct start_date),
+  count(nval_num),
+  count(distinct nval_num),
+  count(units_cd),
+  count(distinct units_cd),
+  min(nval_num),
+  avg(nval_num),
+  max(nval_num)
+from i2b2HSSCdata.observation_fact
+where concept_cd like 'LOINC%'
+group by
+  concept_cd,
+  tval_char,
+  valtype_cd
+order by count(1) desc
+;
+```
+2. delete labs in i2bdev (240 seconds; 2,317,623 rows deleted)
+```
+delete from i2b2HSSCdata.observation_fact
+where concept_cd like 'LOINC%'
+;
+```
+
+3. modified ETL_LABS, compiled in HSSC_ETL@i2bdev
+    a. 'N' in valtype_cd ('N' for Numeric; 'T' for Text)
+    b. result value in nval_num (since Numeric)
+    c. uom in units_cd
+    d. 'E' in tval_char (with Numeric, 'E' = 'Equals')
+
+4. ran ETL_LABS in HSSC_ETL into i2bdev (583 seconds, 2317623 inserted, 5625 PK errors):
+```
+begin
+  HSSC_ETL.ETL_LABS();
+end;
+/
+```
+
+5. re-ran i2bdev_labs_countSumm (see i2bdev_labs_countSumm.dsv)
+
+6. compare counts from last time:
+```
+diff \
+  <(awk -F'|' '{print $1,$4}' i2bdev_labs_countSumm_b4.dsv) \
+  <(awk -F'|' '{print $1,$4}' i2bdev_labs_countSumm_aftr.dsv)
+```
+
+7. manually check that values and units are populated (note that having more than one distinct UNITS_CD is a symptom of the 15% of results that have deviant UOM codes):
+
+```
+awk -F'|' '{print $1,$(NF-2),$(NF),$(NF-1),$(NF-3),$(NF-4)}' i2bdev_labs_countSumm_aftr.dsv | less -N
+```
+
