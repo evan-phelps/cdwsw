@@ -189,14 +189,19 @@ select
   uom_norm,
   uom_excp,
   min_norm,
-  avg_norm,
   max_norm,
   se_norm,
   min_excp,
-  avg_excp,
   max_excp,
   se_excp,
   se_diff,
+--  ref_high_min_norm,
+--  ref_high_max_norm,
+--  ref_high_min_excp,
+--  ref_high_max_excp,
+  avg_norm,
+  avg_excp,
+  round(avg_diff/((avg_norm+avg_excp)/2),4) avg_diff_rel,
   case when se_diff > 0
        then abs(round(avg_diff/se_diff,2))
   end diff_metric_t,
@@ -229,6 +234,10 @@ from
       rgt1.result_avg avg_excp,
       rgt1.result_se se_excp,
       req1.result_avg - rgt1.result_avg avg_diff,
+      req1.ref_high_min ref_high_min_norm,
+      req1.ref_high_max ref_high_max_norm,
+      rgt1.ref_high_min ref_high_min_excp,
+      rgt1.ref_high_max ref_high_max_excp,
       round( sqrt( power(req1.result_se,2)
                  + power(rgt1.result_se,2) ), 4
            ) se_diff
@@ -242,6 +251,8 @@ from
           result_se,
           result_min,
           result_max,
+          ref_high_min,
+          ref_high_max,
           n_results_loinc_uom,
           f_results_loinc_uom
 --        from loinc_uom_counts_1sd
