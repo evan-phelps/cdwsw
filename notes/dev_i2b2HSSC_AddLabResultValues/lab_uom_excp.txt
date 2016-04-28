@@ -15,13 +15,21 @@ There are 4 queries in this file.
 /* BASE STATS */
 /* ********** */
 create table loinc_uom_counts nologging as
-select
+select /*+ parallel 4 */
   loinc_cd,
   result_uom,
   result_min,
   result_max,
   round(result_avg, 4) result_avg,
   round(result_std/sqrt(n_results_loinc_uom),4) result_se,
+  ref_low_min,
+  ref_low_max,
+  round(ref_low_avg, 4) ref_low_avg,
+  ref_low_std,
+  ref_high_min,
+  ref_high_max,
+  round(ref_high_avg, 4) ref_high_avg,
+  ref_high_std,
   n_results_loinc,
   n_results_loinc_uom,
   round(n_results_loinc_uom/n_results_loinc,2) f_results_loinc_uom,
@@ -37,6 +45,14 @@ from
       max(to_number(result_value)) result_max,
       avg(to_number(result_value)) result_avg,
       stddev(to_number(result_value)) result_std,
+      min(to_number(norm_range_low)) ref_low_min,
+      max(to_number(norm_range_low)) ref_low_max,
+      avg(to_number(norm_range_low)) ref_low_avg,
+      stddev(to_number(norm_range_low)) ref_low_std,
+      min(to_number(norm_range_high)) ref_high_min,
+      max(to_number(norm_range_high)) ref_high_max,
+      avg(to_number(norm_range_high)) ref_high_avg,
+      stddev(to_number(norm_range_high)) ref_high_std,
       sum(count(1))
         over (partition by loinc_cd) n_results_loinc,
       count(1) n_results_loinc_uom
