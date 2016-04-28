@@ -172,16 +172,25 @@ select
   rl.tgt_desc,
   uom_norm,
   uom_excp,
+  min_norm,
   avg_norm,
+  max_norm,
   se_norm,
+  min_excp,
   avg_excp,
+  max_excp,
   se_excp,
   se_diff,
   case when se_diff > 0
-       then round(avg_diff/se_diff,2)
+       then abs(round(avg_diff/se_diff,2))
   end diff_metric_t,
   case when se_norm > 0
-       then round(avg_diff/(se_norm*sqrt(n_results_loinc_uom_norm)), 2)
+       then abs(round(avg_diff/(se_norm*sqrt(n_results_loinc_uom_norm)), 2))
+  end diff_metric_m,
+  case when se_norm > 0
+       then round(abs(avg_diff) /
+                  sqrt(se_norm*se_norm*n_results_loinc_uom_norm
+                     + se_excp*se_excp*n_results_loinc_uom_excp), 2)
   end diff_metric_l
 from
   (
@@ -190,10 +199,14 @@ from
       req1.n_results_loinc_uom n_results_loinc_uom_norm,
       req1.loinc_cd loinc_norm,
       req1.result_uom uom_norm,
+      req1.result_min min_norm,
+      req1.result_max max_norm,
       req1.f_results_loinc_uom frac_uom_norm,
       rgt1.n_results_loinc_uom n_results_loinc_uom_excp,
       rgt1.loinc_cd loinc_excp,
       rgt1.result_uom uom_excp,
+      rgt1.result_min min_excp,
+      rgt1.result_max max_excp,
       rgt1.f_results_loinc_uom frac_uom_excp,
       req1.result_avg avg_norm,
       req1.result_se se_norm,
@@ -203,16 +216,20 @@ from
       round( sqrt( power(req1.result_se,2)
                  + power(rgt1.result_se,2) ), 4
            ) se_diff
-    from loinc_uom_counts_1sd req1
+--    from loinc_uom_counts_1sd req1
+    from loinc_uom_counts req1
     left outer join
       ( select
           loinc_cd,
           result_uom,
           result_avg,
           result_se,
+          result_min,
+          result_max,
           n_results_loinc_uom,
           f_results_loinc_uom
-        from loinc_uom_counts_1sd
+--        from loinc_uom_counts_1sd
+        from loinc_uom_counts req1
         where rnk_uom_within_loinc > 1
       ) rgt1 on ( req1.loinc_cd = rgt1.loinc_cd )
     where rnk_uom_within_loinc = 1
@@ -223,7 +240,7 @@ inner join (select distinct tgt_code, tgt_desc
                 select
                   tgt_code, tgt_desc,
                   rank() over (partition by tgt_code
-                               order by length(tgt_desc)
+                               order by length(tgt_desc), tgt_desc
                               ) idx
                 from cdwref.ref_lab
                 where tgt_code_type = 'LAB_LOINC'
