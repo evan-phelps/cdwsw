@@ -1,0 +1,282 @@
+/*
+
+There are 4 queries in this file.
+
+	1. (CTAS) Generate basic stats table for loinc/uom combinations.
+	2. Summarize measures of difference.
+	3. (CTAS) Gecond pass basic stats based on lab result values
+		within 1 SD of avg for each LOINC/UOM combination.
+	4. Summarize measures of difference and join on CDWREF for LOINC
+		descriptions as defined by Theresia.
+
+*/
+
+/* ********** */
+/* BASE STATS */
+/* ********** */
+create table loinc_uom_counts nologging as
+select /*+ parallel 4 */
+  loinc_cd,
+  result_uom,
+  result_min,
+  result_max,
+  round(result_avg, 4) result_avg,
+  round(result_std/sqrt(n_results_loinc_uom),4) result_se,
+  ref_low_min,
+  ref_low_max,
+  round(ref_low_avg, 4) ref_low_avg,
+  ref_low_std,
+  ref_high_min,
+  ref_high_max,
+  round(ref_high_avg, 4) ref_high_avg,
+  ref_high_std,
+  n_results_loinc,
+  n_results_loinc_uom,
+  round(n_results_loinc_uom/n_results_loinc,2) f_results_loinc_uom,
+  rank() over ( partition by loinc_cd
+                order by n_results_loinc_uom desc
+              ) rnk_uom_within_loinc
+from
+  (
+    select
+      loinc_cd,
+      UPPER(result_uom) result_uom,
+      min(to_number(result_value)) result_min,
+      max(to_number(result_value)) result_max,
+      avg(to_number(result_value)) result_avg,
+      stddev(to_number(result_value)) result_std,
+      min(to_number(norm_range_low)) ref_low_min,
+      max(to_number(norm_range_low)) ref_low_max,
+      avg(to_number(norm_range_low)) ref_low_avg,
+      stddev(to_number(norm_range_low)) ref_low_std,
+      min(to_number(norm_range_high)) ref_high_min,
+      max(to_number(norm_range_high)) ref_high_max,
+      avg(to_number(norm_range_high)) ref_high_avg,
+      stddev(to_number(norm_range_high)) ref_high_std,
+      sum(count(1))
+        over (partition by loinc_cd) n_results_loinc,
+      count(1) n_results_loinc_uom
+    from cdw.lab_result
+    where loinc_cd is not null
+    group by
+      loinc_cd,
+      UPPER(result_uom)
+  )
+order by --rnk_uom_within_loinc, n_results_loinc desc
+      loinc_cd,
+      n_results_loinc desc,
+      n_results_loinc_uom desc
+;
+
+/* ********************** */
+/* MEASURES OF DIFFERENCE */
+/* ********************** */
+select
+  n_results_loinc,
+  n_results_loinc_uom_excp n_uom_excp,
+  frac_uom_excp,
+  loinc_norm loinc,
+  uom_norm,
+  uom_excp,
+  avg_norm,
+  se_norm,
+  avg_excp,
+  se_excp,
+  se_diff,
+  case when se_diff > 0
+       then round(avg_diff/se_diff,2)
+  end diff_metric_t,
+  case when se_norm > 0
+       then round(avg_diff/(se_norm*sqrt(n_results_loinc_uom_norm)), 2)
+  end diff_metric_l
+from
+  (
+    select
+      req1.n_results_loinc,
+      req1.n_results_loinc_uom n_results_loinc_uom_norm,
+      req1.loinc_cd loinc_norm,
+      req1.result_uom uom_norm,
+      req1.f_results_loinc_uom frac_uom_norm,
+      rgt1.n_results_loinc_uom n_results_loinc_uom_excp,
+      rgt1.loinc_cd loinc_excp,
+      rgt1.result_uom uom_excp,
+      rgt1.f_results_loinc_uom frac_uom_excp,
+      req1.result_avg avg_norm,
+      req1.result_se se_norm,
+      rgt1.result_avg avg_excp,
+      rgt1.result_se se_excp,
+      req1.result_avg - rgt1.result_avg avg_diff,
+      round( sqrt( power(req1.result_se,2)
+                 + power(rgt1.result_se,2) ), 4
+           ) se_diff
+    from loinc_uom_counts req1
+    left outer join
+      ( select
+          loinc_cd,
+          result_uom,
+          result_avg,
+          result_se,
+          n_results_loinc_uom,
+          f_results_loinc_uom
+        from loinc_uom_counts
+        where rnk_uom_within_loinc > 1
+      ) rgt1 on ( req1.loinc_cd = rgt1.loinc_cd )
+    where rnk_uom_within_loinc = 1
+  )
+--where avg_excp is not null
+order by
+  n_uom_excp desc
+;
+
+/* **************************************** */
+/* ZOOM INTO AVG; REMOVE TAILS AND OUTLIERS */
+/* **************************************** */
+create table loinc_uom_counts_1sd nologging as
+select
+  loinc_cd,
+  result_uom,
+  result_min,
+  result_max,
+  round(result_avg, 4) result_avg,
+  round(result_std/sqrt(n_results_loinc_uom),4) result_se,
+  n_results_loinc,
+  n_results_loinc_uom,
+  round(n_results_loinc_uom/n_results_loinc,2) f_results_loinc_uom,
+  rank() over ( partition by loinc_cd
+                order by n_results_loinc_uom desc
+              ) rnk_uom_within_loinc
+from
+  (
+    select
+      lr.loinc_cd,
+      UPPER(lr.result_uom) result_uom,
+      min(to_number(lr.result_value)) result_min,
+      max(to_number(lr.result_value)) result_max,
+      avg(to_number(lr.result_value)) result_avg,
+      stddev(to_number(lr.result_value)) result_std,
+      sum(count(1))
+        over (partition by lr.loinc_cd) n_results_loinc,
+      count(1) n_results_loinc_uom
+    from cdw.lab_result lr
+    inner join loinc_uom_counts luc
+      on (     lr.loinc_cd = luc.loinc_cd
+           and (    upper(lr.result_uom) = upper(luc.result_uom)
+                 or ( lr.result_uom is null and luc.result_uom is null )
+               )
+         )
+    where lr.loinc_cd is not null
+      and lr.result_value > luc.result_avg - luc.result_se*sqrt(luc.n_results_loinc_uom)
+      and lr.result_value < luc.result_avg + luc.result_se*sqrt(luc.n_results_loinc_uom)
+    group by
+      lr.loinc_cd,
+      UPPER(lr.result_uom)
+  )
+order by --rnk_uom_within_loinc, n_results_loinc desc
+      loinc_cd,
+      n_results_loinc desc,
+      n_results_loinc_uom desc
+;
+
+/* ********************** */
+/* MEASURES OF DIFFERENCE */
+/* ********************** */
+select
+  n_results_loinc,
+  n_results_loinc_uom_excp n_uom_excp,
+  frac_uom_excp,
+  loinc_norm loinc,
+  rl.tgt_desc,
+  uom_norm,
+  uom_excp,
+  min_norm,
+  max_norm,
+  se_norm,
+  min_excp,
+  max_excp,
+  se_excp,
+  se_diff,
+--  ref_high_min_norm,
+--  ref_high_max_norm,
+--  ref_high_min_excp,
+--  ref_high_max_excp,
+  avg_norm,
+  avg_excp,
+  round(avg_diff/((avg_norm+avg_excp)/2),4) avg_diff_rel,
+  case when se_diff > 0
+       then abs(round(avg_diff/se_diff,2))
+  end diff_metric_t,
+  case when se_norm > 0
+       then abs(round(avg_diff/(se_norm*sqrt(n_results_loinc_uom_norm)), 2))
+  end diff_metric_m,
+  case when se_norm > 0
+       then round(abs(avg_diff) /
+                  sqrt(se_norm*se_norm*n_results_loinc_uom_norm
+                     + se_excp*se_excp*n_results_loinc_uom_excp), 2)
+  end diff_metric_l
+from
+  (
+    select
+      req1.n_results_loinc,
+      req1.n_results_loinc_uom n_results_loinc_uom_norm,
+      req1.loinc_cd loinc_norm,
+      req1.result_uom uom_norm,
+      req1.result_min min_norm,
+      req1.result_max max_norm,
+      req1.f_results_loinc_uom frac_uom_norm,
+      rgt1.n_results_loinc_uom n_results_loinc_uom_excp,
+      rgt1.loinc_cd loinc_excp,
+      rgt1.result_uom uom_excp,
+      rgt1.result_min min_excp,
+      rgt1.result_max max_excp,
+      rgt1.f_results_loinc_uom frac_uom_excp,
+      req1.result_avg avg_norm,
+      req1.result_se se_norm,
+      rgt1.result_avg avg_excp,
+      rgt1.result_se se_excp,
+      req1.result_avg - rgt1.result_avg avg_diff,
+      req1.ref_high_min ref_high_min_norm,
+      req1.ref_high_max ref_high_max_norm,
+      rgt1.ref_high_min ref_high_min_excp,
+      rgt1.ref_high_max ref_high_max_excp,
+      round( sqrt( power(req1.result_se,2)
+                 + power(rgt1.result_se,2) ), 4
+           ) se_diff
+--    from loinc_uom_counts_1sd req1
+    from loinc_uom_counts req1
+    left outer join
+      ( select
+          loinc_cd,
+          result_uom,
+          result_avg,
+          result_se,
+          result_min,
+          result_max,
+          ref_high_min,
+          ref_high_max,
+          n_results_loinc_uom,
+          f_results_loinc_uom
+--        from loinc_uom_counts_1sd
+        from loinc_uom_counts req1
+        where rnk_uom_within_loinc > 1
+      ) rgt1 on ( req1.loinc_cd = rgt1.loinc_cd )
+    where rnk_uom_within_loinc = 1
+  ) lrsumm
+inner join (select distinct tgt_code, tgt_desc
+            from
+              (
+                select
+                  tgt_code, tgt_desc,
+                  rank() over (partition by tgt_code
+                               order by length(tgt_desc), tgt_desc
+                              ) idx
+                from cdwref.ref_lab
+                where tgt_code_type = 'LAB_LOINC'
+              )
+            where idx = 1
+           ) rl
+  on (     lrsumm.loinc_norm = rl.tgt_code )
+order by
+  n_uom_excp desc,
+  n_results_loinc desc
+;
+
