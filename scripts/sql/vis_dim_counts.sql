@@ -1,4 +1,4 @@
-icreate or replace PROCEDURE    visdim_counts( m_version IN VARCHAR
+create or replace PROCEDURE    visdim_counts( m_version IN VARCHAR
 DEFAULT TO_CHAR(SYSDATE, 'YYYYMMDD'))
 authid current_user
 AS
