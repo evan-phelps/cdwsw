@@ -1,0 +1,478 @@
+1. Number of procedures by datasource and number of inpatient/outpatient/emergency encounters.
+
+create table pmn_pat_nOIE_nPx_per_ds nologging as
+select
+  pat_enc_cnt.providerid dsid,
+  n_o,
+  n_i,
+  n_e,
+  count(px.patid) n_px,
+  count(distinct px.patid) n_pat_px,
+  count(distinct pat_enc_cnt.patid) n_pat_enc
+from
+  (
+    select /*+ parallel 2 */
+      patid,
+      providerid,
+      count(decode(enc_type, 'ED', 1)) n_e,
+      count(decode(enc_type, 'AV', 1)) n_o,
+      count(decode(enc_type, 'IP', 1)) n_i
+    from pcornetv3.pmn_encounter enc
+    group by patid, providerid
+  ) pat_enc_cnt
+left outer join pcornetv3.pmn_procedures px
+  on ( pat_enc_cnt.patid = px.patid )
+group by 
+  pat_enc_cnt.providerid,
+  n_o,
+  n_i,
+  n_e
+;
+
+2. "Existence" combinations for I/O/E/PX with summary.
+
+select
+  ds, has_o, has_i, has_e, --, has_px,
+  n_pat_enc n_pat, f_pat_in_ds, f_pat_in_all, n_pat_px n_with_px, f_with_px,
+  round((f_with_px-0.5)*f_pat_in_all, 4) px_factor
+from (
+  select
+    decode(dsid, 1, 'MUSC',
+                 25, 'MUSC_EPIC',
+                 2, 'GHS',
+                 3, 'PH',
+                 14, 'SRHS',
+              'UNK'
+          ) ds,
+    decode(n_o, 0, '-', 'X') has_o,
+    decode(n_i, 0, '-', 'X') has_i,
+    decode(n_e, 0, '-', 'X') has_e,
+--    decode(n_px, 0, '-', 'X') has_px,
+    sum(n_pat_enc) n_pat_enc,
+    round(sum(n_pat_enc)/(sum(sum(n_pat_enc)) over
+                            ( partition by decode(dsid, 1, 'MUSC',
+                                                        25, 'MUSC_EPIC',
+                                                        2, 'GHS',
+                                                        3, 'PH',
+                                                        14, 'SRHS',
+                                                     'UNK')
+                            )
+                          ),
+           4
+         ) f_pat_in_ds,
+    round(sum(n_pat_enc)/(sum(sum(n_pat_enc)) over ()), 4) f_pat_in_all,
+    sum(n_pat_px) n_pat_px,
+    round(sum(n_pat_px)/sum(n_pat_enc), 4) f_with_px
+  from PMN_PAT_NOIE_NPX_PER_DS
+  group by
+    decode(dsid, 1, 'MUSC',
+                 25, 'MUSC_EPIC',
+                 2, 'GHS',
+                 3, 'PH',
+                 14, 'SRHS',
+              'UNK'
+          ),
+    decode(n_o, 0, '-', 'X'),
+    decode(n_i, 0, '-', 'X'),
+    decode(n_e, 0, '-', 'X') --,
+--    decode(n_px, 0, '-', 'X')
+)
+order by
+  px_factor
+;
+
+3. Like #1, but without dsid separation
+
+create table pmn_pat_nOIE_nPx nologging as
+select
+  n_o,
+  n_i,
+  n_e,
+  count(px.patid) n_px,
+  count(distinct px.patid) n_pat_px,
+  count(distinct pat_enc_cnt.patid) n_pat_enc
+from
+  (
+    select /*+ parallel 2 */
+      patid,
+      count(decode(enc_type, 'ED', 1)) n_e,
+      count(decode(enc_type, 'AV', 1)) n_o,
+      count(decode(enc_type, 'IP', 1)) n_i
+    from pcornetv3.pmn_encounter enc
+    group by patid
+  ) pat_enc_cnt
+left outer join pcornetv3.pmn_procedures px
+  on ( pat_enc_cnt.patid = px.patid )
+group by
+  n_o,
+  n_i,
+  n_e
+;
+
+4.  Like #2, but without dsid separation
+
+select
+  has_o, has_i, has_e, --, has_px,
+  n_pat_enc n_pat, f_pat_in_all, n_pat_px n_with_px, f_with_px,
+  round((f_with_px-0.5)*f_pat_in_all, 4) px_factor
+from (
+  select
+    decode(n_o, 0, '-', 'X') has_o,
+    decode(n_i, 0, '-', 'X') has_i,
+    decode(n_e, 0, '-', 'X') has_e,
+    sum(n_pat_enc) n_pat_enc,
+    round(sum(n_pat_enc)/(sum(sum(n_pat_enc)) over ()), 4) f_pat_in_all,
+    sum(n_pat_px) n_pat_px,
+    round(sum(n_pat_px)/sum(n_pat_enc), 4) f_with_px
+  from PMN_PAT_NOIE_NPX_PER_DS
+  group by
+    decode(n_o, 0, '-', 'X'),
+    decode(n_i, 0, '-', 'X'),
+    decode(n_e, 0, '-', 'X')
+)   
+order by
+  px_factor
+;
+
+5. Like #1, but considering labs as procedures.
+
+create table pmn_pat_nOIE_nPxLab_per_ds nologging as
+select
+  pat_enc_cnt.providerid dsid,
+  n_o,
+  n_i,
+  n_e,
+  count(px.patid) n_px,
+  count(distinct px.patid) n_pat_px,
+  count(distinct pat_enc_cnt.patid) n_pat_enc
+from
+  (
+    select /*+ parallel 2 */
+      patid,
+      providerid,
+      count(decode(enc_type, 'ED', 1)) n_e,
+      count(decode(enc_type, 'AV', 1)) n_o,
+      count(decode(enc_type, 'IP', 1)) n_i
+    from pcornetv3.pmn_encounter enc
+    group by patid, providerid
+  ) pat_enc_cnt
+left outer join
+  ( select distinct patid
+    from (select patid
+          from pcornetv3.pmn_procedures
+          union
+          select patid
+          from pcornetv3.pmn_lab_result_cm
+         )
+  ) px
+  on ( pat_enc_cnt.patid = px.patid )
+group by
+  pat_enc_cnt.providerid,
+  n_o,
+  n_i,
+  n_e
+;
+
+6. Like #4 but with labs as procedures
+
+select
+  has_o, has_i, has_e, --, has_px,
+  n_pat_enc n_pat, f_pat_in_all, n_pat_px n_with_px, f_with_px,
+  round((f_with_px-0.5)*f_pat_in_all, 4) px_factor
+from (
+  select
+    decode(n_o, 0, '-', 'X') has_o,
+    decode(n_i, 0, '-', 'X') has_i,
+    decode(n_e, 0, '-', 'X') has_e,
+    sum(n_pat_enc) n_pat_enc,
+    round(sum(n_pat_enc)/(sum(sum(n_pat_enc)) over ()), 4) f_pat_in_all,
+    sum(n_pat_px) n_pat_px,
+    round(sum(n_pat_px)/sum(n_pat_enc), 4) f_with_px
+  from pmn_pat_nOIE_nPxLab_per_ds
+  group by
+    decode(n_o, 0, '-', 'X'),
+    decode(n_i, 0, '-', 'X'),
+    decode(n_e, 0, '-', 'X')
+)
+order by
+  px_factor
+;
+
+7. time series
+
+create table pmn_enc_px_by_ds_mnth nologging as
+select /*+ parallel 4 */
+  enc.providerid,
+  trunc(enc.admit_date, 'month') adm_mnth,
+  count(enc.encounterid) n_enc,
+  count(distinct enc.encounterid) n_enc_w_px,
+  count(px.proceduresid) n_px,
+  count(distinct enc.patid) n_pats,
+  count(distinct px.patid) n_pats_w_px
+from pcornetv3.pmn_encounter enc
+left outer join pcornetv3.pmn_procedures px
+  on ( enc.encounterid = px.encounterid )
+group by
+  enc.providerid,
+  trunc(enc.admit_date, 'month')
+order by
+  enc.providerid,
+  adm_mnth desc
+;
+
+8. time series summary, fractions of encs/pats with pxs per ds
+
+select
+  providerid,
+  adm_mnth,
+  n_enc,
+  round(n_pats_w_px/n_pats, 2) frac_of_pats,
+  round(n_enc_w_px/n_enc, 2) frac_of_encs
+from pmn_enc_px_by_ds_mnth
+order by providerid, adm_mnth desc
+;
+
+9. like #5 but cutting out months with less than 0.5% of encounters with pxs
+
+create table pmn_pat_nOIE_nPxLab_per_ds_ndt nologging as
+select
+  pat_enc_cnt.providerid dsid,
+  n_o,
+  n_i,
+  n_e,
+  count(px.patid) n_px,
+  count(distinct px.patid) n_pat_px,
+  count(distinct pat_enc_cnt.patid) n_pat_enc
+from
+  (
+    select /*+ parallel 2 */
+      patid,
+      enc.providerid,
+      count(decode(enc_type, 'ED', 1)) n_e,
+      count(decode(enc_type, 'AV', 1)) n_o,
+      count(decode(enc_type, 'IP', 1)) n_i
+    from pcornetv3.pmn_encounter enc
+    inner join (
+      select
+        providerid,
+        adm_mnth,
+        n_enc,
+        round(n_pats_w_px/n_pats, 2) frac_of_pats,
+        round(n_enc_w_px/n_enc, 2) frac_of_encs
+      from pmn_enc_px_by_ds_mnth
+      where round(n_pats_w_px/n_pats, 2) > 0
+    ) ds_mnths on (    enc.providerid = ds_mnths.providerid
+                   and trunc(enc.admit_date, 'month') = adm_mnth )
+    group by patid, enc.providerid
+  ) pat_enc_cnt
+left outer join
+  ( select distinct patid
+    from (select patid
+          from pcornetv3.pmn_procedures
+          union
+          select patid
+          from pcornetv3.pmn_lab_result_cm
+         )
+  ) px
+  on ( pat_enc_cnt.patid = px.patid )
+group by
+  pat_enc_cnt.providerid,
+  n_o,
+  n_i,
+  n_e
+;
+
+# GHS CPT4
+
+hssc-cdwr3-hsie-s
+[phelpse@hssc-cdwr3-hsie-s ~]$ less /data/hsie/messagesets/historic/ghs/procdiag/CPT4/GHS_DX_PX_CPT_ECW_EXTRACT_20141014000000_20141231235959.txt
+
+[phelpse@hssc-cdwr3-hsie-s ~]$ awk -F'|' '{print $4}' /data/hsie/messagesets/historic/ghs/procdiag/CPT4/hssc_dx_px_cpt_icd9_2007_201309101331.txt | head
+
+screen session "ep"
+
+[phelpse@hssc-cdwr3-hsie-s ~]$ for fn in $(ls /data/hsie/messagesets/historic/ghs/procdiag/CPT4/*.txt);  do     time awk -F'|' '{print $4}' $fn | sort | uniq > `basename $fn`_pids.out; done
+
+[phelpse@hssc-cdwr3-hsie-s ~]$ screen -S ep
+[screen is terminating]
+
+[phelpse@hssc-cdwr3-hsie-s ~]$ time cat *.out | sort | uniq > ghs_patnums_with_cpt4.out
+
+* downloaded file, added header "lid"
+* create insert script
+* execute on i2bhsc via sqldeveloper
+* didn't work... SO...
+* created sqlldr scripts
+* uploaded to phelpse@hssc-cdwr3-dtdb-p
+* added oracle path
+* created table
+* executed sqlldr script
+
+[phelpse@hssc-cdwr3-dtdb-p ~]$ cat ghs_pats_with_cpt4_sqlldr/ghs_patnums_with_cpt4.sh 
+export ORACLE_SID=DTPRD2
+export ORACLE_HOME=/oracle/apps/product/12.1.0.2
+export PATH=$ORACLE_HOME/bin:$PATH
+sqlldr CONTROL=ghs_patnums_with_cpt4.ctl LOG=/home/phelpse/ghs_patnums_with_cpt4.log BAD=/home/phelpse/ghs_patnums_with_cpt4.bad skip=1   
+
+* get cc pat deids for ghs cpt4
+create table ephelps.ghs_pats_with_cpt4_deid nologging as
+select
+  deid.patient_deid
+from cdw.patient_id_map pim
+inner join ephelps.ghs_pats_with_cpt4 ghspat on ( pim.mpi_lid = ghspat.lid )
+inner join cdw.patient_deid_map_cc deid on ( pim.patient_id = deid.patient_id )
+where pim.mpi_systemcode = 'GHS'
+;
+
+* get cc pat deids for srhs ndc
+create table ephelps.srhs_pats_with_ndc nologging as
+select
+  distinct deid.patient_deid
+from cdw.medication_admin ma
+inner join cdw.visit enc on ( ma.visit_id = enc.visit_id )
+inner join cdw.patient_deid_map_cc deid on ( enc.patient_id = deid.patient_id )
+where enc.datasource_id = 14
+;
+
+* In i2bhsc, get labs+ndc impact base:
+
+create table pmn_pat_nOIE_nPxLpN_per_ds nologging as
+select
+  pat_enc_cnt.providerid dsid,
+  n_o,
+  n_i,
+  n_e,
+  count(px.patid) n_px,
+  count(distinct px.patid) n_pat_px,
+  count(distinct pat_enc_cnt.patid) n_pat_enc
+from
+  (
+    select /*+ parallel 2 */
+      patid,
+      providerid,
+      count(decode(enc_type, 'ED', 1)) n_e,
+      count(decode(enc_type, 'AV', 1)) n_o,
+      count(decode(enc_type, 'IP', 1)) n_i
+    from pcornetv3.pmn_encounter enc
+    group by patid, providerid
+  ) pat_enc_cnt
+left outer join
+  ( select distinct patid
+    from (select patid
+          from pcornetv3.pmn_procedures
+          union
+          select patid
+          from pcornetv3.pmn_lab_result_cm
+          union
+          select to_char(patient_deid) patid
+          from ephelps.srhs_pats_with_ndc@dtprd2
+         )
+  ) px
+  on ( pat_enc_cnt.patid = px.patid )
+group by
+  pat_enc_cnt.providerid,
+  n_o,
+  n_i,
+  n_e
+;
+
+select
+  has_o, has_i, has_e, --, has_px,
+  n_pat_enc n_pat, f_pat_in_all, n_pat_px n_with_px, f_with_px,
+  round((f_with_px-0.5)*f_pat_in_all, 4) px_factor
+from (
+  select
+    decode(n_o, 0, '-', 'X') has_o,
+    decode(n_i, 0, '-', 'X') has_i,
+    decode(n_e, 0, '-', 'X') has_e,
+    sum(n_pat_enc) n_pat_enc,
+    round(sum(n_pat_enc)/(sum(sum(n_pat_enc)) over ()), 4) f_pat_in_all,
+    sum(n_pat_px) n_pat_px,
+    round(sum(n_pat_px)/sum(n_pat_enc), 4) f_with_px
+  from pmn_pat_nOIE_nPxLpN_per_ds
+  group by
+    decode(n_o, 0, '-', 'X'),
+    decode(n_i, 0, '-', 'X'),
+    decode(n_e, 0, '-', 'X')
+)
+order by
+  px_factor
+; 
+
+* get labs+ndc+cpt4 impact base:
+
+create table pmn_pat_nOIE_nPxLNC_per_ds nologging as
+select
+  pat_enc_cnt.providerid dsid,
+  n_o,
+  n_i,
+  n_e,
+  count(px.patid) n_px,
+  count(distinct px.patid) n_pat_px,
+  count(distinct pat_enc_cnt.patid) n_pat_enc
+from
+  (
+    select /*+ parallel 2 */
+      patid,
+      providerid,
+      count(decode(enc_type, 'ED', 1)) n_e,
+      count(decode(enc_type, 'AV', 1)) n_o,
+      count(decode(enc_type, 'IP', 1)) n_i
+    from pcornetv3.pmn_encounter enc
+    group by patid, providerid
+  ) pat_enc_cnt
+left outer join
+  ( select distinct patid
+    from (select patid
+          from pcornetv3.pmn_procedures
+          union
+          select patid
+          from pcornetv3.pmn_lab_result_cm
+          union
+          select to_char(patient_deid) patid
+          from ephelps.ghs_pats_with_cpt4_deid@dtprd2
+         )
+  ) px
+  on ( pat_enc_cnt.patid = px.patid )
+group by
+  pat_enc_cnt.providerid,
+  n_o,
+  n_i,
+  n_e
+;
+
+select
+  has_o, has_i, has_e, --, has_px,
+  n_pat_enc n_pat, f_pat_in_all, n_pat_px n_with_px, f_with_px,
+  round((f_with_px-0.5)*f_pat_in_all, 4) px_factor
+from (
+  select
+    decode(n_o, 0, '-', 'X') has_o,
+    decode(n_i, 0, '-', 'X') has_i,
+    decode(n_e, 0, '-', 'X') has_e,
+    sum(n_pat_enc) n_pat_enc,
+    round(sum(n_pat_enc)/(sum(sum(n_pat_enc)) over ()), 4) f_pat_in_all,
+    sum(n_pat_px) n_pat_px,
+    round(sum(n_pat_px)/sum(n_pat_enc), 4) f_with_px
+  from pmn_pat_nOIE_nPxLNC_per_ds
+  group by
+    decode(n_o, 0, '-', 'X'),
+    decode(n_i, 0, '-', 'X'),
+    decode(n_e, 0, '-', 'X')
+)
+order by
+  px_factor
+;
+
+
+select count(distinct patid)
+from (select patid
+      from pcornetv3.pmn_procedures
+      union
+      select patid
+      from pcornetv3.pmn_lab_result_cm
+      union
+      select to_char(patient_deid) patid
+      from ephelps.srhs_pats_with_ndc@dtprd2
+     )
+;

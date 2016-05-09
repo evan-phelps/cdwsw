@@ -1,0 +1,1 @@
+sqlldr CONTROL=ghs_patnums_with_cpt4.ctl LOG=/home/phelpse/ghs_patnums_with_cpt4.log BAD=/home/phelpse/ghs_patnums_with_cpt4.bad skip=1   
