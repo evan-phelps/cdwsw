@@ -1,15 +1,18 @@
+/*
+
+Typically, this script should be executed within the the HSSC_ETL schema.
+
+Generally, it should be executed by user or within a current_schema that
+has the following:
+
+  SELECT/INSERT/UPDATE/DELETE access to CDW tables
+  SELECT access to CDWREF
+  Private MPI db link
+  PKG_LOGGING
+
 -- ALTER SESSION SET current_schema = HSSC_ETL
 -- /
 
-/*
--- This database link should exist in the schema
--- of the package, or accessible from wherever the
--- package resides.
-CREATE DATABASE LINK "MPI"
-   CONNECT TO "PATIENT" IDENTIFIED BY <password>
-   USING 'hssc-cdw-mpidb-d:1521/mpidev'
-;
-/
 */
 
 DROP TABLE cdw_incr_mpi_cntrl;
