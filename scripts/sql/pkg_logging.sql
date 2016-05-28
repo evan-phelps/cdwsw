@@ -1,9 +1,10 @@
+DROP TABLE INFOLOG;
 CREATE TABLE INFOLOG
   (
     ID NUMBER NOT NULL,
     LOG_LEVEL VARCHAR2(5 BYTE) NOT NULL,
     TIME DATE NOT NULL,
-    CODE           VARCHAR2(9 BYTE) NOT NULL,
+    CODE           VARCHAR2(9 BYTE),
     MESSAGE        VARCHAR2(2000 BYTE) NOT NULL,
     PACKAGE_NAME   VARCHAR2(100 BYTE),
     PROCEDURE_NAME VARCHAR2(100 BYTE) NOT NULL,
@@ -12,6 +13,7 @@ CREATE TABLE INFOLOG
   )
 /
 
+DROP SEQUENCE INFOLOG_ID_SEQ;
 CREATE SEQUENCE INFOLOG_ID_SEQ
   MINVALUE 1 MAXVALUE 999999999999999999999999999
   INCREMENT BY 1 START WITH 1
@@ -38,7 +40,7 @@ PACKAGE pkg_logging
 IS
 PROCEDURE log(
     p_log_level infolog.log_level%type DEFAULT 'INFO',
-    p_code infolog.code%type,
+    p_code infolog.code%type DEFAULT NULL,
     p_message infolog.message%type,
     p_package infolog.package_name%type DEFAULT NULL,
     p_procedure infolog.procedure_name%type,
@@ -46,7 +48,7 @@ PROCEDURE log(
     p_parameters infolog.parameters%type DEFAULT NULL);
 PROCEDURE error(
     p_log_level infolog.log_level%type DEFAULT 'ERROR',
-    p_code infolog.code%type,
+    p_code infolog.code%type DEFAULT NULL,
     p_message infolog.message%type,
     p_package infolog.package_name%type DEFAULT NULL,
     p_procedure infolog.procedure_name%type,
@@ -60,7 +62,7 @@ PACKAGE body pkg_logging
 IS
 PROCEDURE log(
     p_log_level infolog.log_level%type DEFAULT 'INFO',
-    p_code infolog.code%type,
+    p_code infolog.code%type DEFAULT NULL,
     p_message infolog.message%type,
     p_package infolog.package_name%type DEFAULT NULL,
     p_procedure infolog.procedure_name%type,
@@ -75,7 +77,7 @@ BEGIN
       TIME,
       log_level,
       code,
-      MESSAGE,
+      message,
       package_name,
       procedure_name,
       location,

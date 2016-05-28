@@ -1,6 +1,12 @@
+-- ALTER SESSION SET current_schema = HSSC_ETL
+-- /
+
 /*
+-- This database link should exist in the schema
+-- of the package, or accessible from wherever the
+-- package resides.
 CREATE DATABASE LINK "MPI"
-   CONNECT TO "PATIENT" IDENTIFIED BY VALUES ':1'
+   CONNECT TO "PATIENT" IDENTIFIED BY <password>
    USING 'hssc-cdw-mpidb-d:1521/mpidev'
 ;
 /
@@ -12,7 +18,7 @@ CREATE TABLE cdw_incr_mpi_cntrl
     BATCH_ID NUMBER NOT NULL,
     TIME_START DATE NOT NULL,
     TIME_LAST DATE,
-    TRANS_TIME_START DATE NOT NULL,
+    TRANS_TIME_START DATE,
     TRANS_TIME_LAST DATE,
     STATUS VARCHAR2(1 BYTE) NOT NULL
   )
@@ -64,14 +70,15 @@ DROP SEQUENCE incr_batch_id_seq;
 CREATE SEQUENCE incr_batch_id_seq
   MINVALUE 1 MAXVALUE 999999999999999999999999999
   INCREMENT BY 1 START WITH 1
-  CACHE 20 NOORDER NOCYCLE ;
+  CACHE 20 NOORDER NOCYCLE
 /
 
 CREATE OR REPLACE
 PACKAGE pkg_cdw_incr
 IS
   PROCEDURE process_mpi_incr(
-              p_trans_t0 cdw_incr_mpi_cntrl.trans_time_start%type DEFAULT NULL);
+              p_trans_t0 cdw_incr_mpi_cntrl.trans_time_start%type DEFAULT NULL,
+              p_max_trans_period NUMBER DEFAULT NULL);
 END pkg_cdw_incr;
 /
 
@@ -79,6 +86,24 @@ CREATE OR REPLACE
 PACKAGE body pkg_cdw_incr
 IS
 
+PKG infolog.package_name%TYPE DEFAULT 'pkg_cdw_incr';
+
+/* Absent an explicit date being provided as a parameter,
+   an exception will be thrown if the transaction start
+   time t0 < sysdate-IMPLICIT_MAX_DAYS */
+IMPLICIT_MAX_DAYS NUMBER := 30;
+
+/* User-defined error numbers must be in range [-20999,-20000]. */
+ERRNUM_INCREMENTAL_TOO_BIG NUMBER := -20999;
+ERRMSG_INCREMENTAL_TOO_BIG VARCHAR2(2048) := 'Incremental period is greater than specified maximum.';
+/* If previous batch did not complete, raise exception. */
+ERRNUM_LAST_INCOMPLETE NUMBER := -20998;
+ERRMSG_LAST_INCOMPLETE VARCHAR2(2048) := 'The last batch did not complete';
+/* If an unexpected state is detected */
+ERRNUM_INCONSISTENCY NUMBER := -20997;
+ERRMSG_INCONSISTENCY VARCHAR2(2048) := 'Unexpected state.';
+
+/* Some state variables */
 C_STAT_MPI_PREP CONSTANT VARCHAR2(1) := 'P';
 C_STAT_MPI_STAGE CONSTANT VARCHAR2(1) := 'S';
 C_STAT_MPI_MERGE CONSTANT VARCHAR2(1) := 'M';
@@ -88,23 +113,21 @@ C_STAT_MPI_ERROR CONSTANT VARCHAR2(1) := 'E';
 C_STAT_MPI_SUCCESS CONSTANT VARCHAR2(1) := 'C';
 
 PROCEDURE process_mpi_incr(
-    p_trans_t0 cdw_incr_mpi_cntrl.trans_time_start%type DEFAULT NULL)
+    p_trans_t0 cdw_incr_mpi_cntrl.trans_time_start%type DEFAULT NULL,
+    p_max_trans_period NUMBER DEFAULT NULL)
 IS
+  PRCDR infolog.procedure_name%TYPE DEFAULT 'process_mpi_incr';
+
   m_batch_id NUMBER := incr_batch_id_seq.NEXTVAL;
+  m_batch_stat_last CHAR(1);
   m_time_start DATE := SYSDATE;
   m_trans_t0 DATE := p_trans_t0;
   m_trans_t1 DATE := m_time_start;
+  m_batch_id_last NUMBER;
+  m_max_trans_period NUMBER := p_max_trans_period;
   m_pkg VARCHAR2(100 BYTE) := 'PKG_CDW_INCR';
   m_prc VARCHAR2(100 BYTE) := 'PROCESS_MPI_INCR';
 BEGIN
-
-/* TODO: Consider action required on failure.  For example, if a batch
- *       fails, and if we allow new batches to be processed, then when
- *       we treat the root cause of the error, we would need to restrict
- *       re-processing of the errored batch to those records that do not
- *       have more recent updates for the same EUID.  There might be
- *       other scenarios to consider.
- */
 
 /* TODO: Consider having a separately scheduled process for recalculating
  *       all ages and ages at visits and any other time-dependent derived
@@ -118,26 +141,62 @@ BEGIN
  *       Probably, yes, especially to allow updates to the cntrl table to
  *       escape the mainline SAVEPOINT/ROLLBACK scheme.  For now, I'll
  *       try to artfully avoid conflicts with the rollback strategy.
+ * TODO: Consider decoupling the CDW_INCR_MPI_CNTRL table further to 
+ *       allow for predefined batches with predetermined transaction
+ *       periods.
+ */
+
+/* TODO: Add "trans time last" argument.  Currently, all batches process
+ *       from "trans start time" through the latest transactions.
+ * TODO: Also (or alternatively?) consider allowing start/end transaction
+  *      numbers... or at lease store them?
  */
   INSERT INTO cdw_incr_mpi_cntrl (batch_id, time_start, time_last, status)
   VALUES (m_batch_id, m_time_start, SYSDATE, C_STAT_MPI_PREP)
   ;
   COMMIT;
 
-/* Pick a starting point based on latest processed transaction time,
- * according to batch cntrl table.
+/* If the transaction start time is not explicitly passed, then pick a
+   starting point based on previous batch, if the previous batch was
+   successful.
  */
+  IF m_max_trans_period IS NULL THEN
+    m_max_trans_period := IMPLICIT_MAX_DAYS;
+  END IF;
+
   IF m_trans_t0 IS NULL THEN
-    SELECT trans_time_last INTO m_trans_t0
+    SELECT trans_time_last, status, batch_id
+      INTO m_trans_t0, m_batch_stat_last, m_batch_id_last
     FROM
       (
-        SELECT trans_time_last
+        SELECT trans_time_last, status, batch_id
         FROM cdw_incr_mpi_cntrl
+        WHERE batch_id < m_batch_id
         ORDER BY
-          trans_time_last DESC NULLS LAST
+          batch_id DESC
       )
     WHERE ROWNUM <= 1
     ;
+    IF m_batch_stat_last != 'C' THEN
+      RAISE_APPLICATION_ERROR(ERRNUM_LAST_INCOMPLETE,
+                              ERRMSG_LAST_INCOMPLETE
+                                || ' (#' || m_batch_id_last || ')');
+    END IF;
+  END IF;
+
+  IF m_trans_t0 IS NULL THEN
+    RAISE_APPLICATION_ERROR(ERRNUM_INCONSISTENCY,
+                            ERRMSG_INCONSISTENCY
+                              || ' TRANS_TIME_LAST is missing from last batch (#'
+                              || m_batch_id_last || ').');
+  END IF;
+  IF sysdate-m_trans_t0 > m_max_trans_period THEN
+    RAISE_APPLICATION_ERROR(ERRNUM_INCREMENTAL_TOO_BIG,
+                            ERRMSG_INCREMENTAL_TOO_BIG
+                            || ' Transaction period is '
+                            || round(sysdate-m_trans_t0)
+                            || ' days; max is '
+                            || m_max_trans_period || ' days.');
   END IF;
 
 /* Update cntrl information with transaction time range.
@@ -220,24 +279,29 @@ BEGIN
     p.militarystatus,
     p.militarybranch,
     p.militaryrank
-  FROM SBYN_PATIENTSBR P
-  LEFT JOIN SBYN_ADDRESSSBR A
+  FROM SBYN_PATIENTSBR@MPI P
+  LEFT JOIN SBYN_ADDRESSSBR@MPI A
     ON (    A.PATIENTID = P.PATIENTID
         AND A.ADDRESSTYPE='HOME')
-  LEFT JOIN SBYN_PHONESBR H
+  LEFT JOIN SBYN_PHONESBR@MPI H
     ON (    H.PATIENTID = P.PATIENTID
         AND H.PHONETYPE='HOME')
-  LEFT JOIN SBYN_PHONESBR W
+  LEFT JOIN SBYN_PHONESBR@MPI W
     ON (    W.PATIENTID = P.PATIENTID
         AND W.PHONETYPE='WORK')
-  LEFT JOIN SBYN_PHONESBR M
+  LEFT JOIN SBYN_PHONESBR@MPI M
     ON (   M.PATIENTID = P.PATIENTID
         AND M.PHONETYPE='MOBILE' )
-  INNER JOIN sbyn_transaction T
+  INNER JOIN sbyn_transaction@MPI T
     ON (    T.EUID = P.EUID
         AND T.TIMESTAMP >= m_trans_t0
         AND T.TIMESTAMP < m_trans_t1 )
   ;
+  pkg_logging.log( p_package=>PKG,
+                   p_procedure=>PRCDR,
+                   p_message=>sql%rowcount || ' patients staged.',
+                   p_parameters=>m_batch_id
+                 );
 
 /* Update cntrl information and simultaneously commit the staged records.
  */
@@ -359,7 +423,7 @@ BEGIN
     pat.MILITARY_BRANCH = pat_incr.MILITARY_BRANCH,
     pat.MILITARY_RANK = pat_incr.MILITARY_RANK,
     pat.LAST_UPDATE_DATE = sysdate
-  when not matched then insert (
+  WHEN NOT MATCHED THEN INSERT (
     pat.MPI_EUID,
     pat.FIRST_NAME,
     pat.MIDDLE_NAME,
@@ -399,7 +463,7 @@ BEGIN
     pat.MILITARY_BRANCH,
     pat.MILITARY_RANK,
     pat.LAST_UPDATE_DATE
-  ) values (
+  ) VALUES (
     pat_incr.MPI_EUID,
     pat_incr.FIRST_NAME,
     pat_incr.MIDDLE_NAME,
@@ -441,12 +505,137 @@ BEGIN
     sysdate
   )
   ;
+  pkg_logging.log( p_package=>PKG,
+                   p_procedure=>PRCDR,
+                   p_message=>sql%rowcount
+                              || ' patients merged into patient table.',
+                   p_parameters=>m_batch_id
+                 );
 
 /* Update cntrl information and simultaneously commit the merged records.
  */
   UPDATE cdw_incr_mpi_cntrl
   SET time_last = SYSDATE,
       status = C_STAT_MPI_MAPLIDS
+  WHERE batch_id = m_batch_id
+  ;
+  COMMIT;
+
+  MERGE INTO cdw.patient_id_map pim
+  USING (
+   SELECT
+      pat.patient_id, mpi_x.*
+    FROM cdw_incr_mpi_stg stg
+    INNER JOIN sbyn_enterprise@MPI mpi_x
+      ON (    stg.mpi_euid = mpi_x.euid )
+    INNER JOIN cdw.patient pat
+      ON (    stg.mpi_euid = pat.mpi_euid )
+    WHERE stg.batch_id = m_batch_id
+  ) incr
+  ON (     incr.lid = pim.mpi_lid
+       AND incr.systemcode = pim.mpi_systemcode
+     )
+  WHEN MATCHED THEN UPDATE SET
+    pim.MPI_EUID = incr.EUID,
+    pim.LAST_UPDATE_DATE = sysdate
+  WHEN NOT MATCHED THEN INSERT (
+    pim.PATIENT_ID,
+    pim.MPI_EUID,
+    pim.MPI_LID,
+    pim.MPI_SYSTEMCODE,
+    pim.LAST_UPDATE_DATE
+  ) VALUES (
+    incr.PATIENT_ID,
+    incr.EUID,
+    incr.LID,
+    incr.SYSTEMCODE,
+    sysdate
+  )
+  ;
+  pkg_logging.log( p_package=>PKG,
+                   p_procedure=>PRCDR,
+                   p_message=>sql%rowcount
+                              || ' local patients mapped.',
+                   p_parameters=>m_batch_id
+                 );
+
+/* Update cntrl information and simultaneously commit the euid-lid mapping.
+ */
+  UPDATE cdw_incr_mpi_cntrl
+  SET time_last = SYSDATE,
+      status = C_STAT_MPI_RECONCILE
+  WHERE batch_id = m_batch_id
+  ;
+  COMMIT;
+
+  MERGE INTO cdw.visit enc
+  USING (
+    SELECT DISTINCT
+      vd.visit_id,
+      pim.patient_id
+    FROM
+      cdw.visit_detail vd,
+      cdw.patient_id_map pim,
+      cdw.visit v,
+      cdw_incr_mpi_stg incr
+    WHERE vd.visit_id = v.visit_id
+      AND vd.htb_patient_id_ext = pim.mpi_lid
+      AND pim.mpi_systemcode = decode(v.htb_enc_id_root,
+            '2.16.840.1.113883.3.2489.2.1.2.1.3.1.2.4', 'MUSC',
+            '2.16.840.1.113883.3.2489.2.1.2.2.3.1.2.2', 'MUSC_EPIC',
+            '2.16.840.1.113883.3.2489.2.2.2.1.3.1.2.4', 'GHS',
+            '2.16.840.1.113883.3.2489.2.3.4.1.2.4.1', 'PH',
+            '2.16.840.1.113883.3.2489.2.3.4.1.2.4.3', 'PH',
+            '2.16.840.1.113883.3.2489.2.3.4.1.2.4.4', 'PH',
+            '2.16.840.1.113883.3.2489.2.3.4.1.2.4.2', 'PH',
+            '2.16.840.1.113883.3.2489.2.4.4.1.2.4.1', 'SRHS_R',
+            '2.16.840.1.113883.3.2489.2.4.4.1.2.4.2', 'SRHS_S',
+            '2.16.840.1.113883.3.2489.2.4.4.1.2.4.3', 'SRHS_V',
+            NULL)
+      AND pim.mpi_euid = incr.mpi_euid
+      AND incr.batch_id = m_batch_id
+  ) recs ON (    enc.visit_id = recs.visit_id)
+  WHEN MATCHED THEN UPDATE SET 
+    enc.patient_id = recs.patient_id
+  WHERE enc.patient_id != recs.patient_id
+  ;
+  pkg_logging.log( p_package=>PKG,
+                   p_procedure=>PRCDR,
+                   p_message=>sql%rowcount
+                              || ' visits updated with new patient_id.',
+                   p_parameters=>m_batch_id
+                 );
+
+  MERGE INTO cdw.visit_detail vd
+  USING (
+    SELECT DISTINCT
+      v.visit_id,
+      pat.patient_id
+    FROM
+      cdw.patient pat,
+      cdw.visit v,
+      cdw_incr_mpi_stg incr
+    WHERE v.patient_id = pat.patient_id
+      AND pat.mpi_euid = incr.mpi_euid
+      AND incr.batch_id = m_batch_id
+  ) recs ON ( vd.visit_id = recs.visit_id )
+  WHEN MATCHED THEN UPDATE SET 
+    vd.patient_id = recs.patient_id
+  WHERE vd.patient_id != recs.patient_id
+  ;
+  pkg_logging.log( p_package=>PKG,
+                   p_procedure=>PRCDR,
+                   p_message=>sql%rowcount
+                              || ' visit details updated with new patient_id.',
+                   p_parameters=>m_batch_id
+                 );
+
+/* Update cntrl information and simultaneously commit the updated patient ids
+ * on visits.
+ */
+  UPDATE cdw_incr_mpi_cntrl
+  SET time_last = SYSDATE,
+      status = C_STAT_MPI_SUCCESS
   WHERE batch_id = m_batch_id
   ;
   COMMIT;
