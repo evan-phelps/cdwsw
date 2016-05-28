@@ -9,9 +9,11 @@
  TODO: Orchestrate creation of user with grants and creation of private DB
        link, which requires directly connecting as the new user.
  */
+ --drop user HSSC_ETL cascade;
 create user HSSC_ETL identified by changeme;
 
 grant CREATE SESSION to HSSC_ETL;
+grant UNLIMITED TABLESPACE to HSSC_ETL;
 grant SELECT ANY TABLE to HSSC_ETL;
 grant CREATE DATABASE LINK to HSSC_ETL;
 

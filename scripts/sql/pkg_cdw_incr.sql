@@ -89,7 +89,7 @@ CREATE OR REPLACE
 PACKAGE body pkg_cdw_incr
 IS
 
-PKG infolog.package_name%TYPE DEFAULT 'pkg_cdw_incr';
+PKG infolog.package_name%TYPE := 'pkg_cdw_incr';
 
 /* Absent an explicit date being provided as a parameter,
    an exception will be thrown if the transaction start
@@ -119,7 +119,7 @@ PROCEDURE process_mpi_incr(
     p_trans_t0 cdw_incr_mpi_cntrl.trans_time_start%type DEFAULT NULL,
     p_max_trans_period NUMBER DEFAULT NULL)
 IS
-  PRCDR infolog.procedure_name%TYPE DEFAULT 'process_mpi_incr';
+  PRCDR infolog.procedure_name%TYPE := 'process_mpi_incr';
 
   m_batch_id NUMBER := incr_batch_id_seq.NEXTVAL;
   m_batch_stat_last CHAR(1);
@@ -149,10 +149,12 @@ BEGIN
  *       periods.
  */
 
-/* TODO: Add "trans time last" argument.  Currently, all batches process
+/* TODO: It's dangerous to use sysdate as the last transaction time if
+ *       there is no guarantee of clock synchronization between MPI and CDW.
+ * TODO: Add "trans time last" argument.  Currently, all batches process
  *       from "trans start time" through the latest transactions.
  * TODO: Also (or alternatively?) consider allowing start/end transaction
-  *      numbers... or at lease store them?
+ *       numbers... or at lease store them?
  */
   INSERT INTO cdw_incr_mpi_cntrl (batch_id, time_start, time_last, status)
   VALUES (m_batch_id, m_time_start, SYSDATE, C_STAT_MPI_PREP)
@@ -381,9 +383,20 @@ BEGIN
     LEFT OUTER JOIN cdwref.ref_demographics r_sex
       ON (    r_sex.src_code_type = 'HSSC_MPI_Gender'
           AND stg.sex_orig = r_sex.src_code )
-    LEFT OUTER JOIN cdwref.ref_demographics r_zip
-      ON (    r_zip.src_code_type = 'ZIP'
-          AND substr(stg.zip,1,5) = r_zip.src_code )
+    LEFT OUTER JOIN ( select
+                        *
+                      from (
+                        select
+                          src_code,
+                          tgt_code,
+                          rank() over (partition by src_code
+                                       order by tgt_code asc) rnk
+                        from cdwref.ref_demographics r_dem
+                        where r_dem.src_code_type = 'ZIP'
+                      )
+                      where rnk = 1
+                    ) r_zip
+      ON (    substr(stg.zip,1,5) = r_zip.src_code )
     WHERE stg.batch_id = m_batch_id
   ) pat_incr
   ON ( pat.mpi_euid = pat_incr.mpi_euid )
