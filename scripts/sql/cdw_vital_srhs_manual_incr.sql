@@ -1,3 +1,4 @@
+--11054 merged in ~35 minutes (during RMAN backups, which slows down IO significantly)
 MERGE INTO cdw.vital vit
   USING
 	(
