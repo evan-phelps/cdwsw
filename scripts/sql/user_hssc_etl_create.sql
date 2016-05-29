@@ -6,6 +6,11 @@
  USING 'hssc-cdw-mpidb-d:1521/mpidev'
  ;
  
+ CREATE DATABASE LINK "HTB"
+ CONNECT TO "APPS" IDENTIFIED BY <password>
+ USING 'hssc-cdwr3-db1-d:1521/htbdev'
+ ;
+
  TODO: Orchestrate creation of user with grants and creation of private DB
        link, which requires directly connecting as the new user.
  */

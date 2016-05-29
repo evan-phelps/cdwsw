@@ -13,6 +13,33 @@ has the following:
 -- ALTER SESSION SET current_schema = HSSC_ETL
 -- /
 
+Scheduling examples:
+
+--Every 10 minutes
+begin
+dbms_scheduler.create_job (
+   job_name           =>  'run_mpi_incr',
+   job_type           =>  'STORED_PROCEDURE',
+   job_action         =>  'HSSC_ETL.PKG_CDW_INCR.PROCESS_MPI_INCR',
+   start_date         =>  '28-May-2016 01:00:00 AM',
+   repeat_interval    =>  'FREQ=MINUTELY; INTERVAL=10;',
+   enabled            =>  TRUE);
+END;
+/
+
+--Every day at 6am
+begin
+   dbms_scheduler.set_attribute
+   (name => 'run_mpi_incr',
+    attribute => 'REPEAT_INTERVAL',
+    value     => 'FREQ=HOURLY; INTERVAL=24;');
+   dbms_scheduler.set_attribute
+   (name => 'run_mpi_incr',
+    attribute => 'start_date',
+    value     => '28-May-2016 06:00:00 AM');
+end;
+/
+
 */
 
 DROP TABLE cdw_incr_mpi_cntrl;
@@ -27,6 +54,11 @@ CREATE TABLE cdw_incr_mpi_cntrl
   )
 /
 
+/* TODO: It's dangerous to use sysdate as the last transaction time if
+ *       there is no guarantee of clock synchronization between MPI and CDW.
+ *       Maybe add the transaction time into cdw_incr_mpi_stg and use the
+ *       real last transaction time.
+ */
 DROP TABLE cdw_incr_mpi_stg;
 CREATE TABLE cdw_incr_mpi_stg
   (
@@ -82,6 +114,7 @@ IS
   PROCEDURE process_mpi_incr(
               p_trans_t0 cdw_incr_mpi_cntrl.trans_time_start%type DEFAULT NULL,
               p_max_trans_period NUMBER DEFAULT NULL);
+  PROCEDURE update_ages();
 END pkg_cdw_incr;
 /
 
@@ -132,6 +165,9 @@ IS
   m_prc VARCHAR2(100 BYTE) := 'PROCESS_MPI_INCR';
 BEGIN
 
+/* TODO: Add periodic cleanup of CDW_INCR_MPI_STG.
+ */
+ 
 /* TODO: Consider having a separately scheduled process for recalculating
  *       all ages and ages at visits and any other time-dependent derived
  *       values... or, as policy, stop storing such values in CDW.
@@ -149,9 +185,7 @@ BEGIN
  *       periods.
  */
 
-/* TODO: It's dangerous to use sysdate as the last transaction time if
- *       there is no guarantee of clock synchronization between MPI and CDW.
- * TODO: Add "trans time last" argument.  Currently, all batches process
+/* TODO: Add "trans time last" argument.  Currently, all batches process
  *       from "trans start time" through the latest transactions.
  * TODO: Also (or alternatively?) consider allowing start/end transaction
  *       numbers... or at lease store them?
