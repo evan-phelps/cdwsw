@@ -59,7 +59,6 @@ CREATE TABLE cdw_incr_mpi_cntrl
  *       Maybe add the transaction time into cdw_incr_mpi_stg and use the
  *       real last transaction time.
  */
-DROP TABLE cdw_incr_mpi_stg;
 CREATE TABLE cdw_incr_mpi_stg
   (
     BATCH_ID NUMBER NOT NULL,
@@ -101,7 +100,6 @@ CREATE TABLE cdw_incr_mpi_stg
 
 /* General sequence for incremental batch processes.
 */
-DROP SEQUENCE incr_batch_id_seq;
 CREATE SEQUENCE incr_batch_id_seq
   MINVALUE 1 MAXVALUE 999999999999999999999999999
   INCREMENT BY 1 START WITH 1
