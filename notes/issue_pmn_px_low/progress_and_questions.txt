@@ -1,0 +1,380 @@
+# Actions
+
+1. loaded GHS CPT4 procedures through HTB into CDW (will be picked up on next full i2b2/cdm load)
+2. loaded MUSC CPT4 procedures directly into CDW procedures_cpt4_temp (will *not* be picked up on next full i2b2/cdm load)
+3. copied GHS CPT4 procedures into procedures_cpt4_temp
+4. loaded temp table procedures into cc i2b2 and cdm
+5. fixed PK violations on diagnosis and vital by using sequences (did not analyze character of "duplicates")
+6. fixed PK violations on procedures (removed 18 true duplicates)
+7. removed early birth_date values
+```
+alter table pcori2.pmn_demographic add (birth_date_old date);
+update pcori2.pmn_demographic set birth_date_old = birth_date;
+commit;
+update pcori2.pmn_demographic
+set birth_date = NULL
+where birth_date < to_date('19020101','YYYYMMDD')
+;
+commit;
+```
+
+8. backed up records to be deleted based on dates
+```
+create table ephelps.pmn_encounter_xd nologging as
+select * from pcori2.pmn_encounter
+where discharge_date < to_date('2007-01-01', 'YYYY-MM-DD')
+   or discharge_date > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+create table ephelps.pmn_diagnosis_xd nologging as
+select * from pcori2.pmn_diagnosis
+where discharge_date < to_date('2007-01-01', 'YYYY-MM-DD')
+   or discharge_date > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+create table ephelps.pmn_procedures_xd nologging as
+select * from pcori2.pmn_procedures
+where discharge_date < to_date('2007-01-01', 'YYYY-MM-DD')
+   or discharge_date > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+create table ephelps.pmn_enrollment_xd nologging as
+select * from pcori2.pmn_enrollment
+where enr_end_date < to_date('2007-01-01', 'YYYY-MM-DD')
+   or enr_end_date > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+create table ephelps.pmn_procedures_xpxd nologging as
+select * from pcori2.pmn_procedures
+where px_date < to_date('2007-01-01', 'YYYY-MM-DD')
+   or px_date > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+create table pmn_vital_xmd as
+select * from pcori2.pmn_vital
+where measure_date < to_date('2007-01-01', 'YYYY-MM-DD')
+   or measure_date > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+```
+
+SAME for admit_date into _x tables.
+
+9. delete based on dates
+
+```
+delete from pcori2.pmn_encounter
+where ADMIT_DATE < to_date('2007-01-01', 'YYYY-MM-DD')
+   or ADMIT_DATE > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+delete from pcori2.pmn_diagnosis
+where ADMIT_DATE < to_date('2007-01-01', 'YYYY-MM-DD')
+   or ADMIT_DATE > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+delete from pcori2.pmn_procedures
+where ADMIT_DATE < to_date('2007-01-01', 'YYYY-MM-DD')
+   or ADMIT_DATE > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+delete from pcori2.pmn_enrollment
+where enr_start_date < to_date('2007-01-01', 'YYYY-MM-DD')
+   or enr_start_date > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+delete from pcori2.pmn_encounter
+where DISCHARGE_DATE < to_date('2007-01-01', 'YYYY-MM-DD')
+   or DISCHARGE_DATE > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+delete from pcori2.pmn_procedures
+where px_date < to_date('2007-01-01', 'YYYY-MM-DD')
+   or px_date > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+
+delete from pcori2.pmn_vital
+where measure_date < to_date('2007-01-01', 'YYYY-MM-DD')
+   or measure_date > to_date('2016-03-31', 'YYYY-MM-DD')
+;
+```
+
+3,408 birth_dates earlier than 1902 removed.
+
+Clinical data not between 2007 and 3/2016 deleted:
+5,671+5 encounter records
+4,512 diagnosis records
+4,233+229 procedures records
+2,983 enrollment records
+
+10. backup discharge_disposition
+```
+alter table pcori2.pmn_encounter add (discharge_disposition_old varchar2(2 byte));
+update pcori2.pmn_encounter set discharge_disposition_old = discharge_disposition;
+commit;
+```
+
+11. Check distributions
+```
+select /*+ parallel 4 */
+  enc.enc_type,
+  enc.discharge_disposition,
+  count(1) n_encs,
+  count(distinct enc.patid) n_pats
+from pcori2.pmn_encounter enc
+inner join pcori2.pmn_death dth
+  on (    dth.patid = enc.patid
+      and dth.death_date = enc.admit_date )
+group by 
+  enc.enc_type,
+  enc.discharge_disposition
+order by
+  enc.enc_type,
+  enc.discharge_disposition
+;
+```
+```
+ENC_TYPE	DISCHARGE_DISPOSITION	N_ENCS	N_PATS
+AV	A	8080	5186
+AV	E	13	13
+AV	NI	196	178
+ED	A	96	95
+ED	E	1007	1006
+ED	NI	2	2
+IP	A	16	15
+IP	E	380	380
+IP	NI	19	19
+```
+
+217 are eligible for updating based on death_date.
+
+```
+select enc_type, discharge_disposition, count(1)
+from pcori2.pmn_encounter
+group by enc_type, discharge_disposition
+order by enc_type, discharge_disposition
+;
+```
+BEFORE:
+```
+ENC_TYPE	DISCHARGE_DISPOSITION	COUNT(1)
+AV	A	26122232
+AV	E	1412
+AV	NI	7755569
+ED	A	3341359
+ED	E	3214
+ED	NI	273341
+IP	A	1154021
+IP	E	29265
+IP	NI	382434
+```
+
+```
+update pcori2.pmn_encounter
+set discharge_disposition = 'E'
+where encounterid in
+(
+  select /*+ parallel 4 */
+    enc.encounterid
+  from pcori2.pmn_encounter enc
+  inner join pcori2.pmn_death dth
+    on (    dth.patid = enc.patid
+        and dth.death_date = enc.admit_date )
+  where discharge_disposition in ('NI', 'OT', 'UN')
+);
+
+update pcori2.pmn_encounter
+set discharge_disposition = 'A'
+where rowid in
+(
+  select rid from
+  (
+    select /*+ parallel 4 */
+      rowid rid,
+      patid,
+      encounterid,
+      rank() over (partition by patid order by discharge_date desc, admit_date desc, encounterid desc) rseq
+    from pcori2.pmn_encounter enc
+    where discharge_date is not null and admit_date is not null
+      and discharge_disposition = 'NI'
+  )
+  where rseq > 1
+)
+  and discharge_disposition in ('NI', 'OT', 'UN')
+;
+```
+
+AFTER:
+
+12. 
+
+13. removed invalid ht/wt (925 records)
+```
+delete from pcori2.pmn_vital
+where ht > 115 or ht <= 0 or wt >=1500 or wt <= 0
+;
+```
+
+14.
+```
+update vital source
+update pcori2.pmn_vital
+set vital_source = 'HC'
+;
+```
+
+All PR observations are weights:
+```
+create table vital_stated nologging as
+select distinct visit_deid, observation_type, collection_date, vital_value_num
+from cdw.vital@dtprd2 vit
+inner join cdw.visit_deid_map_cc@dtprd2 ccmap
+   on (    vit.htb_enc_act_id = ccmap.visit_id )
+where vital_value_string = 'Stated'
+  and not exists (select 1 from cdw.vital vit2
+                  where vit2.htb_enc_act_id = vit.htb_enc_act_id
+                    and vit2.observation_type = vit.observation_type
+                    and vit2.collection_date = vit.collection_date
+                    and vital_value_string != 'Stated'
+                 )
+;
+merge into pcori2.pmn_vital tgt
+using vital_stated src
+  on (    src.visit_deid = tgt.encounterid
+      and src.collection_date = tgt.measure_date
+      and round(2.205*src.vital_value_num) = tgt.wt )
+when matched then update set vital_source = 'PR'
+;
+```
+12,234 records changed to PR.
+
+15. procedure time series in cdw
+```
+create table px_per_enc nologging as
+select /*+ parallel 4 */
+  enc.datasource_id dsid,
+  enc.class_code enc_type,
+  trunc(enc.visit_start_date) adate,
+  count(distinct enc.visit_id) n_enc,
+  count(distinct enc.visit_id || '|' || px.procedure_id) n_proc,
+  count(distinct enc.visit_id || '|' || px.procedure_id)/count(distinct enc.visit_id) n_proc_per_enc
+from cdw.visit enc
+left outer join cdw.procedure px
+   on ( enc.visit_id = px.visit_id )
+inner join cdw.visit_deid_map_cc emap
+   on ( enc.visit_id = emap.visit_id )
+where px.proc_code is not null
+  and enc.visit_start_date > to_date('2006-01-01', 'YYYY-MM-DD')
+  and enc.visit_start_date < sysdate
+group by
+  enc.datasource_id,
+  enc.class_code,
+  trunc(enc.visit_start_date)
+order by
+  dsid,
+  enc_type,
+  adate
+;
+```
+
+16. encounters without clinical
+```
+create table ephelps.encs_with_clinical nologging as
+select distinct 'dx' dtype, encounterid from pcori2.pmn_diagnosis
+union
+select distinct 'px' dtype, encounterid from pcori2.pmn_procedures
+union
+select distinct 'rx' dtype, encounterid from pcori2.pmn_prescribing
+union
+select distinct 'lr' dtype, encounterid from pcori2.pmn_lab_result_cm
+union
+select distinct 'vt' dtype, encounterid from pcori2.pmn_vital
+;
+
+create table pcori2.pmn_encounter_with_clinical nologging as
+select /*+ parallel 4 */
+  *
+from pcori2.pmn_encounter enc
+--inner join ephelps.encs_with_clinical using (encounterid)
+where exists (select 1 from ephelps.encs_with_clinical enc2
+              where enc2.encounterid = enc.encounterid)
+--where encounterid in (select distinct encounterid
+--                      from ephelps.encs_with_clinical)
+;
+
+alter session set current_schema = PCORI2;
+alter table PMN_ENCOUNTER rename to pmn_encounter_all;
+alter index pmn_encounter_patid_idx rename to pmn_encounter_all_patid_idx;
+alter index PMN_ENCOUNTER_ENCOUNDERID_IDX rename to pmn_encounter_all_encid_idx;
+alter table PMN_ENCOUNTER_with_clinical rename to pmn_encounter;
+
+CREATE INDEX "PCORI2"."PMN_ENCOUNTER_PATID_IDX" ON "PCORI2"."PMN_ENCOUNTER" ("PATID") 
+  PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS 
+  STORAGE(INITIAL 65536 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "PCORNET_DATA" ;
+
+CREATE UNIQUE INDEX "PCORI2"."PMN_ENCOUNTER_ENCOUNTERID_IDX" ON "PCORI2"."PMN_ENCOUNTER" ("ENCOUNTERID") 
+  PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS 
+  STORAGE(INITIAL 65536 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "PCORNET_DATA" ;
+
+```
+
+17. impdb dx file provided by Jeff/Kasturi
+
+18. skim for inpatient
+
+Assumptions (verified):
+
+	a. only SRHS and PH have DISDX dxs
+	b. all GHS and MUSC_EPIC dxs are type DX, but they will be assumed to be Final (DISDX)
+	c. PH has some type DX dxs
+
+```
+create table enc_dx_rel_ip nologging as
+select /*+ parallel 4 */
+  edrel.source_act_id,
+  edrel.target_act_id,
+  edrel.owner_code,
+  edrel.sequence_num,
+  edrel.priority_num,
+  edrel.dx_type,
+  enc.datasource_id dsid,
+  to_char(enc.visit_start_date, 'YYYYMMDDHH24MISS') dx_date,
+  coalesce(encd.aprdrg, encd.msdrg) drg,
+  case when encd.aprdrg is not null then 'APR'
+       when encd.msdrg is not null then 'MS'
+       else NULL
+  end AS drg_type,
+  dx.dx_code,
+  dx.dx_code_type,
+  dx.dx_severity
+from enc_diag_relationship edrel
+inner join cdw.visit enc on ( edrel.source_act_id = enc.visit_id )
+inner join cdw.visit_detail encd on ( enc.visit_id = encd.visit_detail_id )
+inner join cdw.diagnosis dx on ( edrel.target_act_id = dx.htb_diag_act_id )
+where class_code = 'I'
+  and coalesce(edrel.priority_num, edrel.sequence_num) = 1
+;
+```
+
+# Questions
+
+1. Why is raw_px_type=C2 for px_type=C4?
+
+select /*+ parallel */
+  raw_px_type,
+  px_type,
+  count(1)
+from pcori2.pmn_procedures
+group by 
+  raw_px_type,
+  px_type
+order by
+  raw_px_type,
+  px_type
+;
+

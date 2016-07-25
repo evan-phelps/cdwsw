@@ -1,0 +1,75 @@
+1. procedures in cdm.  AFTER verifying that the records are truly duplicates...
+
+delete from pcori2.pmn_procedures
+where rowid in (
+select rec from
+(
+select /*+ parallel 4 */
+  rowid rec,
+  proceduresid,
+  rank() over (partition by proceduresid order by rowid) seq
+from pcori2.pmn_procedures
+)
+where seq > 1
+)
+;
+--18 records deleted, as expected
+
+2. Why is raw_px_type=C2 for px_type=C4?
+
+select /*+ parallel */
+  raw_px_type,
+  px_type,
+  count(1)
+from pcori2.pmn_procedures
+group by 
+  raw_px_type,
+  px_type
+order by
+  raw_px_type,
+  px_type
+;
+
+3. remove duplicate diagnosis and vital records:
+
+--- created sequence
+CREATE SEQUENCE PCORI2.DIAGNOSISID_SEQ
+        INCREMENT BY 1
+        START WITH 1001
+        MAXVALUE 9999999999999999999999999999
+        NOMINVALUE
+        NOCYCLE
+        CACHE 20
+        NOORDER
+GO
+ 
+CREATE SEQUENCE PCORI2.VITALID_SEQ
+        INCREMENT BY 1
+        START WITH 1001
+        MAXVALUE 9999999999999999999999999999
+        NOMINVALUE
+        NOCYCLE
+        CACHE 20
+        NOORDER
+GO
+ 
+--- altered the tables
+ALTER TABLE PCORI2.PMN_DIAGNOSIS ADD (DIAGNOSISID_OLD VARCHAR2(50))
+ 
+ALTER TABLE PCORI2.PMN_VITAL ADD (VITALID_OLD VARCHAR2(50))
+ 
+---- populated the ‘old’ columns
+UPDATE PCORI2.PMN_DIAGNOSIS SET DIAGNOSISID_OLD = DIAGNOSISID
+COMMIT
+ 
+UPDATE PCORI2.PMN_VITAL SET VITALID_OLD = VITALID
+COMMIT
+ 
+---- repopulated the ID columns
+ 
+UPDATE PCORI2.PMN_DIAGNOSIS SET DIAGNOSISID = PCORI2.DIAGNOSISID_SEQ.NEXTVAL
+COMMIT
+ 
+UPDATE PCORI2.PMN_VITAL SET VITALID = PCORI2.VITALID_SEQ.NEXTVAL
+COMMIT
+

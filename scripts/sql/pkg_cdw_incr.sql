@@ -42,10 +42,10 @@ end;
 
 */
 
-DROP TABLE cdw_incr_mpi_cntrl;
-CREATE TABLE cdw_incr_mpi_cntrl
+CREATE TABLE cdw_batch_cntrl
   (
     BATCH_ID NUMBER NOT NULL,
+    BATCH_TYPE VARCHAR2(64) NOT NULL,
     TIME_START DATE NOT NULL,
     TIME_LAST DATE,
     TRANS_TIME_START DATE,
