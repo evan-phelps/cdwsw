@@ -42,7 +42,7 @@ end;
 
 */
 
-CREATE TABLE cdw_batch_cntrl
+CREATE TABLE cdw_incr_mpi_cntrl
   (
     BATCH_ID NUMBER NOT NULL,
     BATCH_TYPE VARCHAR2(64) NOT NULL,
