@@ -1069,7 +1069,7 @@ BEGIN
 END pop_enc;
 
 PROCEDURE update_age IS
-  PRCDR infolog.procedure_name%TYPE := 'process_mpi_incr';
+  PRCDR infolog.procedure_name%TYPE := 'update_age';
 BEGIN
 
   update cdw.patient
