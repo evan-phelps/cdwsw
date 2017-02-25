@@ -1,0 +1,77 @@
+1. count encounters by root
+
+select
+  htb_enc_id_root htbroot, trunc(last_update_date, 'month') updt,
+  count(1) nenc, count(1)-count(patient_id) norph,
+  (count(1)-count(patient_id))/count(1) forph
+from cdw.visit
+where last_update_date > to_date('20160101','YYYYMMDD')
+group by htb_enc_id_root, trunc(last_update_date, 'month')
+order by trunc(last_update_date, 'month') desc, htb_enc_id_root
+;
+
+MUSC_EPIC counts follow:
+
+updt	nenc	norph	forph
+2017-01	258951	16507	6.37%
+2016-11	324594	537	0.17%
+2016-09	1865913	18055	0.97%
+
+2. update visits that need refreshed patient_ids
+
+MERGE INTO cdw.visit enc
+USING (
+  SELECT DISTINCT
+    vd.visit_id,
+    pim.patient_id
+  FROM
+    cdw.visit_detail vd,
+    cdw.patient_id_map pim,
+    cdw.visit v
+  WHERE vd.visit_id = v.visit_id
+    AND vd.htb_patient_id_ext = pim.mpi_lid
+    AND v.htb_enc_id_root = '2.16.840.1.113883.3.2489.2.1.2.2.3.1.2.2'
+    AND pim.mpi_systemcode = 'MUSC_EPIC'
+) recs ON (    enc.visit_id = recs.visit_id)
+WHEN MATCHED THEN UPDATE SET 
+  enc.patient_id = recs.patient_id
+WHERE enc.patient_id != recs.patient_id
+   OR ( enc.patient_id is null 
+       AND recs.patient_id is not null)
+;
+-- 90 rows merged
+
+3. Since MUSC ported OACIS patient ids into EPIC in a way that preserves numeric values, it is safe (*special case!*) to match the same root against 'MUSC' systemcodes, too.  Such a high number was matched that I looked into MPI and found that MUSC_EPIC records are being assigned the MUSC systemcode.  I reached out to Jeff to see whether this is expected.  In the meantime, I modified the incremental extract to match on "MUSC" instead of "MUSC_EPIC."
+
+MERGE INTO cdw.visit enc
+USING (
+  SELECT DISTINCT
+    vd.visit_id,
+    pim.patient_id
+  FROM
+    cdw.visit_detail vd,
+    cdw.patient_id_map pim,
+    cdw.visit v
+  WHERE vd.visit_id = v.visit_id
+    AND vd.htb_patient_id_ext = pim.mpi_lid
+    AND v.htb_enc_id_root = '2.16.840.1.113883.3.2489.2.1.2.2.3.1.2.2'
+    AND pim.mpi_systemcode = 'MUSC'
+) recs ON (    enc.visit_id = recs.visit_id)
+WHEN MATCHED THEN UPDATE SET 
+  enc.patient_id = recs.patient_id
+WHERE enc.patient_id != recs.patient_id
+   OR ( enc.patient_id is null 
+       AND recs.patient_id is not null)
+;
+-- 31,214 rows merged
+
+4. repeated #2 on visit_detail -- count matched
+
+5. repeated #3 on visit_detail -- count matched
+
+6. repeat #1 (count)
+
+2017-01	258951	0	0.00%
+2016-11	324594	0	0.00%
+2016-09	1865913	4290	0.23%
+
