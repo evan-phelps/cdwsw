@@ -251,7 +251,9 @@ BEGIN
  *       periods.
  */
 
-/* TODO: Add "trans time last" argument.  Currently, all batches process
+/* TODO: It's dangerous to use sysdate as the last transaction time if
+ *       there is no guarantee of clock synchronization between MPI and CDW.
+ * TODO: Add "trans time last" argument.  Currently, all batches process
  *       from "trans start time" through the latest transactions.
  * TODO: Also (or alternatively?) consider allowing start/end transaction
  *       numbers... or at lease store them?
@@ -702,7 +704,7 @@ BEGIN
       AND vd.htb_patient_id_ext = pim.mpi_lid
       AND pim.mpi_systemcode = decode(v.htb_enc_id_root,
             '2.16.840.1.113883.3.2489.2.1.2.1.3.1.2.4', 'MUSC',
-            '2.16.840.1.113883.3.2489.2.1.2.2.3.1.2.2', 'MUSC_EPIC',
+            '2.16.840.1.113883.3.2489.2.1.2.2.3.1.2.2', 'MUSC',  --'MUSC_EPIC',
             '2.16.840.1.113883.3.2489.2.2.2.1.3.1.2.4', 'GHS',
             '2.16.840.1.113883.3.2489.2.3.4.1.2.4.1', 'PH',
             '2.16.840.1.113883.3.2489.2.3.4.1.2.4.3', 'PH',
@@ -710,7 +712,7 @@ BEGIN
             '2.16.840.1.113883.3.2489.2.3.4.1.2.4.2', 'PH',
             '2.16.840.1.113883.3.2489.2.4.4.1.2.4.1', 'SRHS_R',
             '2.16.840.1.113883.3.2489.2.4.4.1.2.4.2', 'SRHS_S',
-            '2.16.840.1.113883.3.2489.2.4.4.1.2.4.3', 'SRHS_V',
+            '2.16.840.1.113883.3.2489.2.4.4.1.2.4.3', 'SRHS_P',  --'SRHS_V',
             NULL)
       AND pim.mpi_euid = incr.mpi_euid
       AND incr.batch_id = m_batch_id
@@ -718,6 +720,8 @@ BEGIN
   WHEN MATCHED THEN UPDATE SET
     enc.patient_id = recs.patient_id
   WHERE enc.patient_id != recs.patient_id
+     OR (    enc.patient_id IS NULL
+         AND recs.patient_id IS NOT NULL )
   ;
   pkg_logging.log( p_package=>PKG,
                    p_procedure=>PRCDR,
@@ -742,6 +746,8 @@ BEGIN
   WHEN MATCHED THEN UPDATE SET
     vd.patient_id = recs.patient_id
   WHERE vd.patient_id != recs.patient_id
+     OR (    vd.patient_id IS NULL
+         AND recs.patient_id IS NOT NULL )
   ;
   pkg_logging.log( p_package=>PKG,
                    p_procedure=>PRCDR,
